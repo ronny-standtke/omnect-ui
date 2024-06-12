@@ -1,0 +1,242 @@
+<html>
+
+<head>
+  <title>Centrifugo quick start</title>
+  <link rel="stylesheet" href="static/css/styles.css" />
+</head>
+
+<body>
+  <div class="content-wrapper">
+    <div class="logo-container">
+      <img src="static/images/logo.png" width="64px" height="64px" alt="" />
+      <h2 class="primary">omnect <span class="secondary">ui</span></h2>
+    </div>
+
+    <h3>Login</h3>
+    <div class="login-wrapper">
+      <input class="input-style" type="text" name="user" id="user" />
+      <input class="input-style" type="password" name="pass" id="password" />
+      <button class="btn" id="login">login</button>
+    </div>
+
+    <h3>Stats</h3>
+    <div class="key-value-wrapper">
+      <div class="key">online:</div>
+      <div id="online">N/A</div>
+    </div>
+    <div class="key-value-wrapper">
+      <div class="key">os-version:</div>
+      <div id="osversion">N/A</div>
+    </div>
+    <div class="key-value-wrapper">
+      <div class="key">os-name:</div>
+      <div id="osname">N/A</div>
+    </div>
+    <div class="key-value-wrapper">
+      <div class="key">wait online timeout secs:</div>
+      <div id="wait-online-timeout">N/A</div>
+    </div>
+    <div class="key-value-wrapper">
+      <div class="key">omnect-device-service-version:</div>
+      <div id="omnect-device-service-version">N/A</div>
+    </div>
+    <div class="key-value-wrapper">
+      <div class="key">azure-sdk-version:</div>
+      <div id="azure-sdk-version">N/A</div>
+    </div>
+
+    <h3>Commands</h3>
+    <div class="commands">
+      <button class="btn" id="reboot">reboot</button>
+      <button class="btn" id="reload-network">reload network</button>
+    </div>
+  </div>
+  <script src="static/javascript/centrifuge.js"></script>
+  <script type="module">
+    var token = "";
+    var user = "omnect-ui";
+    var password = "123";
+    var centrifuge;
+    var subOnlineStatus;
+    var subVersion;
+    var subTimeout;
+    var xhr = new XMLHttpRequest();
+
+    document
+      .querySelector("#login")
+      .addEventListener("click", await getLoginToken);
+    document.querySelector("#reboot").addEventListener("click", reboot);
+    document
+      .querySelector("#reload-network")
+      .addEventListener("click", reloadNetwork);
+
+    const online = document.getElementById("online");
+    const osversion = document.getElementById("osversion");
+    const osname = document.getElementById("osname");
+    const waitOnlineTimeout = document.getElementById("wait-online-timeout");
+    const omnectDeviceServiceVersion = document.getElementById(
+      "omnect-device-service-version"
+    );
+    const azureSdkVersion = document.getElementById("azure-sdk-version");
+
+    function bytesToBase64(bytes) {
+      const binString = Array.from(bytes, (byte) =>
+        String.fromCodePoint(byte)
+      ).join("");
+      return btoa(binString);
+    }
+
+    async function getLoginToken() {
+      const response = new Promise(function (resolve, reject) {
+        var user = document.getElementById("user").value;
+        var password = document.getElementById("password").value;
+        var creds = bytesToBase64(
+          new TextEncoder().encode(user + ":" + password)
+        );
+
+        xhr.open("Post", "token/login", true);
+        xhr.setRequestHeader("Authorization", "Basic " + creds);
+        xhr.onload = function () {
+          var status = xhr.status;
+          if (status == 200) {
+            console.log(xhr.response);
+            resolve(xhr.response);
+          } else {
+            reject(status);
+          }
+        };
+        xhr.send();
+      });
+
+      token = await response;
+
+      var centrifuge_url = "wss://" + window.location.hostname + ":8000/connection/websocket";
+      //var centrifuge_url = "ws://" + window.location.hostname + ":8000/connection/websocket";
+      console.log(`centrifuge_url: ${centrifuge_url}`);
+
+      centrifuge = new Centrifuge(
+        centrifuge_url,
+        {
+          token: token,
+          getToken: getConnectionToken(),
+        }
+      );
+
+      centrifuge
+        .on("connecting", function (ctx) {
+          console.log(`connecting: ${ctx.code}, ${ctx.reason}`);
+        })
+        .on("connected", function (ctx) {
+          console.log(`connected over ${ctx.transport}`);
+        })
+        .on("disconnected", function (ctx) {
+          console.log(`disconnected: ${ctx.code}, ${ctx.reason}`);
+        })
+        .connect();
+
+      centrifuge.history("OnlineStatus", { limit: 1 }).then(function (resp) {
+        console.log(resp);
+        if (0 < resp.publications.length) {
+          setOnlineStatus(resp.publications[0].data);
+        }
+      });
+
+      centrifuge.history("Versions", { limit: 1 }).then(function (resp) {
+        console.log(resp);
+        if (0 < resp.publications.length) {
+          setVersion(resp.publications[0].data);
+        }
+      });
+
+      centrifuge.history("Timeouts", { limit: 1 }).then(function (resp) {
+        console.log(resp);
+        if (0 < resp.publications.length) {
+          setTimeout(resp.publications[0].data);
+        }
+      });
+
+      subOnlineStatus = centrifuge.newSubscription("OnlineStatus");
+      subVersion = centrifuge.newSubscription("Versions");
+      subTimeout = centrifuge.newSubscription("Timeouts");
+
+      subOnlineStatus
+        .on("publication", function (ctx) {
+          setOnlineStatus(ctx.data);
+        })
+        .subscribe();
+
+      subVersion
+        .on("publication", function (ctx) {
+          setVersion(ctx.data);
+        })
+        .subscribe();
+
+      subTimeout
+        .on("publication", function (ctx) {
+          setTimeout(ctx.data);
+        })
+        .subscribe();
+    }
+
+    async function getConnectionToken() {
+      const response = new Promise(function (resolve, reject) {
+        xhr.open("Get", "token/refresh", true);
+        xhr.setRequestHeader("Authorization", "Bearer " + token);
+        xhr.onload = function () {
+          var status = xhr.status;
+          if (status == 200) {
+            console.log(xhr.response);
+            resolve(xhr.response);
+          } else {
+            reject(status);
+          }
+        };
+        xhr.send();
+      });
+
+      token = await response;
+      return token;
+    }
+
+    function setVersion(data) {
+      if (typeof data["os-version"] !== "undefined") {
+        osversion.innerHTML = data["os-version"]["swVersion"];
+        osname.innerHTML = data["os-version"]["osName"];
+      }
+      if (typeof data["omnect-device-service-version"] !== "undefined") {
+        omnectDeviceServiceVersion.innerHTML =
+          data["omnect-device-service-version"];
+      }
+      if (typeof data["azure-sdk-version"] !== "undefined") {
+        azureSdkVersion.innerHTML = data["azure-sdk-version"];
+      }
+    }
+
+    function setOnlineStatus(data) {
+      if (typeof data["iothub"] !== "undefined") {
+        online.innerHTML = data["iothub"];
+      }
+    }
+
+    function setTimeout(data) {
+      if (typeof data["wait-online-timeout"] !== "undefined") {
+        waitOnlineTimeout.innerHTML =
+          data["wait-online-timeout"]["secs"] + "secs";
+      }
+    }
+
+    function reboot() {
+      xhr.open("POST", "reboot", true);
+      xhr.setRequestHeader("Authorization", "Bearer " + token);
+      xhr.send();
+    }
+
+    function reloadNetwork() {
+      xhr.open("POST", "reload-network", true);
+      xhr.setRequestHeader("Authorization", "Bearer " + token);
+      xhr.send();
+    }
+  </script>
+</body>
+
+</html>
