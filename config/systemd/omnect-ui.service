@@ -10,7 +10,7 @@ Type=oneshot
 
 EnvironmentFile=-/etc/omnect/omnect-ui.env
 
-ExecStart=/bin/bash -c "docker load < /mnt/factory/oci_images/omnect-ui.tar.gz; \
+ExecStart=/bin/bash -c 'FULL_TAG=$(docker load < /mnt/factory/oci_images/omnect-ui.tar.gz | grep "Loaded image: " | cut -d ':' -f2) ; \
                         docker run -d --restart always --name omnect-ui \
                             --user $(id -u omnect_device_socket):$(id -g omnect_device_socket) \
                             --mount type=bind,source=/run/omnect-device-service/api.sock,target=/socket/api.sock \
@@ -20,7 +20,7 @@ ExecStart=/bin/bash -c "docker load < /mnt/factory/oci_images/omnect-ui.tar.gz; 
                             -e UI_PORT=${UI_PORT} \
                             -e CENTRIFUGO_ALLOW_HISTORY_FOR_CLIENT=true \
                             -e CENTRIFUGO_ALLOW_SUBSCRIBE_FOR_CLIENT=true \
-                            -e CENTRIFUGO_ALLOWED_ORIGINS=https://$(hostname | tr [:upper:] [:lower:]):${UI_PORT} \
+                            -e CENTRIFUGO_ALLOWED_ORIGINS=* \
                             -e CENTRIFUGO_API_KEY=${CENTRIFUGO_API_KEY} \
                             -e CENTRIFUGO_HISTORY_SIZE=1 \
                             -e CENTRIFUGO_HISTORY_TTL=720h \
@@ -34,7 +34,7 @@ ExecStart=/bin/bash -c "docker load < /mnt/factory/oci_images/omnect-ui.tar.gz; 
                             -e SOCKET_PATH=/socket/api.sock \
                             -e SSL_CERT_PATH=/cert/device_id_cert.pem \
                             -e SSL_KEY_PATH=/cert/device_id_cert_key.pem \
-                        omnectshareddevacr.azurecr.io/omnect-ui:${TAG}"
+                        $${FULL_TAG}'
 
 RemainAfterExit=true
 
