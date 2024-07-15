@@ -72,10 +72,11 @@ async fn main() {
     let server = HttpServer::new(move || {
         App::new()
             .route("/", web::get().to(index))
-            .route("/token/login", web::post().to(login_token))
-            .route("/token/refresh", web::get().to(refresh_token))
+            .route("/factory-reset", web::post().to(factory_reset))
             .route("/reboot", web::post().to(reboot))
             .route("/reload-network", web::post().to(reload_network))
+            .route("/token/login", web::post().to(login_token))
+            .route("/token/refresh", web::get().to(refresh_token))
             .service(
                 Files::new(
                     "/static",
@@ -165,6 +166,18 @@ async fn refresh_token(auth: BearerAuth) -> impl Responder {
         }
         Err(e) => {
             error!("refresh_token: {e}");
+            HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
+        }
+    }
+}
+
+async fn factory_reset(auth: BearerAuth) -> impl Responder {
+    debug!("factory_reset() called");
+
+    match post("/factory-reset/v1", Some(auth)).await {
+        Ok(response) => response,
+        Err(e) => {
+            error!("factory_reset failed: {e}");
             HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
         }
     }

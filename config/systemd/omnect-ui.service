@@ -10,7 +10,7 @@ Type=oneshot
 
 EnvironmentFile=-/etc/omnect/omnect-ui.env
 
-ExecStart=/bin/bash -c 'FULL_TAG=$(docker load < /mnt/factory/oci_images/omnect-ui.tar.gz | grep "Loaded image: " | cut -d ':' -f2) ; \
+ExecStart=/bin/bash -c 'FULL_TAG=$(docker load < /mnt/factory/oci_images/omnect-ui.tar.gz | grep "Loaded image: " | cut -d ':' -f2-) ; \
                         docker run -d --restart always --name omnect-ui \
                             --user $(id -u omnect_device_socket):$(id -g omnect_device_socket) \
                             --mount type=bind,source=/run/omnect-device-service/api.sock,target=/socket/api.sock \

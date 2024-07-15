@@ -44,9 +44,14 @@
       <div class="key">azure-sdk-version:</div>
       <div id="azure-sdk-version">N/A</div>
     </div>
+    <div class="key-value-wrapper">
+      <div class="key">factory-reset-result:</div>
+      <div id="factory-reset-result">N/A</div>
+    </div>
 
     <h3>Commands</h3>
     <div class="commands">
+      <button class="btn" id="factory-reset">factory reset</button>
       <button class="btn" id="reboot">reboot</button>
       <button class="btn" id="reload-network">reload network</button>
     </div>
@@ -54,10 +59,9 @@
   <script src="static/javascript/centrifuge.js"></script>
   <script type="module">
     var token = "";
-    var user = "omnect-ui";
-    var password = "123";
     var centrifuge;
     var subOnlineStatus;
+    var subFactoryResetResult;
     var subVersion;
     var subTimeout;
     var xhr = new XMLHttpRequest();
@@ -65,6 +69,7 @@
     document
       .querySelector("#login")
       .addEventListener("click", await getLoginToken);
+    document.querySelector("#factory-reset").addEventListener("click", factoryReset);
     document.querySelector("#reboot").addEventListener("click", reboot);
     document
       .querySelector("#reload-network")
@@ -78,6 +83,7 @@
       "omnect-device-service-version"
     );
     const azureSdkVersion = document.getElementById("azure-sdk-version");
+    const factoryResetResult = document.getElementById("factory-reset-result");
 
     function bytesToBase64(bytes) {
       const binString = Array.from(bytes, (byte) =>
@@ -111,7 +117,6 @@
       token = await response;
 
       var centrifuge_url = "wss://" + window.location.hostname + ":8000/connection/websocket";
-      //var centrifuge_url = "ws://" + window.location.hostname + ":8000/connection/websocket";
       console.log(`centrifuge_url: ${centrifuge_url}`);
 
       centrifuge = new Centrifuge(
@@ -141,6 +146,13 @@
         }
       });
 
+      centrifuge.history("FactoryResetResult", { limit: 1 }).then(function (resp) {
+        console.log(resp);
+        if (0 < resp.publications.length) {
+          setFactoryResetResult(resp.publications[0].data);
+        }
+      });
+
       centrifuge.history("Versions", { limit: 1 }).then(function (resp) {
         console.log(resp);
         if (0 < resp.publications.length) {
@@ -156,12 +168,19 @@
       });
 
       subOnlineStatus = centrifuge.newSubscription("OnlineStatus");
+      subFactoryResetResult = centrifuge.newSubscription("FactoryResetResult");
       subVersion = centrifuge.newSubscription("Versions");
       subTimeout = centrifuge.newSubscription("Timeouts");
 
       subOnlineStatus
         .on("publication", function (ctx) {
           setOnlineStatus(ctx.data);
+        })
+        .subscribe();
+
+      subFactoryResetResult
+        .on("publication", function (ctx) {
+          setFactoryResetResult(ctx.data);
         })
         .subscribe();
 
@@ -223,6 +242,19 @@
         waitOnlineTimeout.innerHTML =
           data["wait-online-timeout"]["secs"] + "secs";
       }
+    }
+
+    function setFactoryResetResult(data) {
+      if (typeof data["factory-reset-status"] !== "undefined") {
+        factoryResetResult.innerHTML =
+          data["factory-reset-status"];
+      }
+    }
+
+    function factoryReset() {
+      xhr.open("POST", "factory-reset", true);
+      xhr.setRequestHeader("Authorization", "Bearer " + token);
+      xhr.send();
     }
 
     function reboot() {

@@ -16,7 +16,7 @@ Since omnect-os is designed as generic OS, all specific or optional applications
 
 ### iotedge deployment
 
-In case it is agreed the omnect team takes care of providing omnect-ui as application in omnect-portal. Get into contact with support@omnect.io if interested. 
+In case it is agreed, the omnect team takes care of providing omnect-ui as application in omnect-portal. Get into contact with support@omnect.io if interested.
 
 ### Inject into omnect-os image
 
@@ -30,7 +30,7 @@ If omnect-ui must be part of the omnect-os image, several configuration files ha
 3.  inject config files via [omnect-cli](https://github.com/omnect/omnect-cli) into omnect-os image
 ```
 # download and copy omnect-ui docker image
-omnect-cli docker inject -d omnectsharedprodacr.azurecr.io/omnect-portal-omnect-ui:latest -e /oci_images/omnect-ui.tar.gz -i my-omnect-os-image.wic
+omnect-cli docker inject -d omnect/omnect-ui:latest -e /oci_images/omnect-ui.tar.gz -i my-omnect-os-image.wic
 
 # copy config files
 omnect-cli file copy-to-image \
@@ -41,7 +41,7 @@ omnect-cli file copy-to-image \
 	-f create-fs-links.txt,factory:/etc/omnect/create-fs-links.txt \
 	-i my-omnect-os-image.wic
 
-# copy certificates 
+# copy certificates
 # only in case not already done (e.g. device provisioned by tpm)
 # devices provisioned by x509 usually already have certs injected
 omnect-cli identity set-device-certificate \
