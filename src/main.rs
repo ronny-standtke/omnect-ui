@@ -45,29 +45,36 @@ async fn main() {
         .parse::<u64>()
         .expect("UI_PORT format");
 
-    let mut certs_file = std::io::BufReader::new(
-        std::fs::File::open(std::env::var("SSL_CERT_PATH").expect("SSL_CERT_PATH missing"))
-            .expect("read certs_file"),
-    );
-    let mut key_file = std::io::BufReader::new(
-        std::fs::File::open(std::env::var("SSL_KEY_PATH").expect("SSL_KEY_PATH missing"))
-            .expect("read key_file"),
-    );
+    let device_cert_path = std::env::var("SSL_CERT_PATH").expect("SSL_CERT_PATH missing");
+    let device_key_path = std::env::var("SSL_KEY_PATH").expect("SSL_KEY_PATH missing");
 
-    let tls_certs = rustls_pemfile::certs(&mut certs_file)
+    info!("device cert file: {device_cert_path}");
+    info!("device key file: {device_key_path}");
+
+    let mut tls_certs =
+        std::io::BufReader::new(std::fs::File::open(device_cert_path).expect("read certs_file"));
+    let mut tls_key =
+        std::io::BufReader::new(std::fs::File::open(device_key_path).expect("read key_file"));
+
+    let tls_certs = rustls_pemfile::certs(&mut tls_certs)
         .collect::<Result<Vec<_>, _>>()
         .expect("failed to parse cert pem");
 
-    let tls_key = rustls_pemfile::rsa_private_keys(&mut key_file)
-        .next()
-        .expect("no keys found")
-        .expect("invalid key found");
-
     // set up TLS config options
-    let tls_config = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(tls_certs, rustls::pki_types::PrivateKeyDer::Pkcs1(tls_key))
-        .expect("invalid tls config");
+    let tls_config = match rustls_pemfile::read_one(&mut tls_key)
+        .expect("cannot read key pem file")
+        .expect("nothing found in key pem file")
+    {
+        rustls_pemfile::Item::Pkcs1Key(key) => rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(tls_certs, rustls::pki_types::PrivateKeyDer::Pkcs1(key))
+            .expect("invalid tls config"),
+        rustls_pemfile::Item::Pkcs8Key(key) => rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(tls_certs, rustls::pki_types::PrivateKeyDer::Pkcs8(key))
+            .expect("invalid tls config"),
+        _ => panic!("unexpected item found in key pem file"),
+    };
 
     let server = HttpServer::new(move || {
         App::new()
