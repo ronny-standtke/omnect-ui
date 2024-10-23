@@ -1,3 +1,11 @@
+:root {
+  --border: rgb(203, 213, 224);
+  --success: #4caf50;
+  --error: #cf6679;
+  --primary: #677680;
+  --secondary: #0094b1;
+}
+
 body {
   background: #f9f9f9;
   padding: 0 24px;
@@ -64,16 +72,17 @@ h2 {
 }
 
 .primary {
-  color: #677680;
+  color: var(--primary);
 }
 
 .secondary {
-  color: #0094b1;
+  color: var(--secondary);
 }
 
 .commands {
   display: flex;
   column-gap: 16px;
+  margin-bottom: 10px;
 }
 
 h3 {
@@ -109,3 +118,68 @@ h3 {
   flex-direction: column;
   row-gap: 16px;
 }
+
+#logout {
+  display: none;
+}
+
+section {
+  display: none;
+}
+
+.online, .offline {
+  width: 15px;
+  height: 15px;
+  border-radius: 15px;
+}
+
+.online {
+  background-color: var(--success);
+}
+
+.offline {
+  background-color: var(--error);
+}
+
+.divider {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: .5em;
+  padding-bottom: .5em;
+}
+
+.spacer {
+  height: 2em;
+}
+
+dialog[open] {
+  border: 0 none;
+  border-radius: 5px;
+  background-color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dialog-title {
+  font-weight: 700;
+}
+
+.loader {
+  width: 60px;
+  height: 60px;
+  border: 5px solid var(--secondary);
+  border-bottom-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  box-sizing: border-box;
+  animation: rotation .75s linear infinite;
+  }
+
+  @keyframes rotation {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+} 

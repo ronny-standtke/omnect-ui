@@ -89,7 +89,6 @@ async fn main() {
                     "/static",
                     std::fs::canonicalize("static").expect("static folder not found"),
                 )
-                .show_files_listing(),
             )
     })
     .bind_rustls_0_22(format!("0.0.0.0:{ui_port}"), tls_config)
@@ -134,7 +133,7 @@ async fn index() -> actix_web::Result<NamedFile> {
     match post("/republish/v1", None).await {
         Ok(response) => response,
         Err(e) => {
-            error!("republish failed: {e}");
+            error!("republish failed: {e:#}");
             return Err(actix_web::error::ErrorInternalServerError(
                 "republish failed",
             ));
@@ -156,7 +155,7 @@ async fn login_token(auth: BasicAuth) -> impl Responder {
             HttpResponse::build(StatusCode::UNAUTHORIZED).finish()
         }
         Err(e) => {
-            error!("login_token: {e}");
+            error!("login_token: {e:#}");
             HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
         }
     }
@@ -172,7 +171,7 @@ async fn refresh_token(auth: BearerAuth) -> impl Responder {
             HttpResponse::build(StatusCode::UNAUTHORIZED).finish()
         }
         Err(e) => {
-            error!("refresh_token: {e}");
+            error!("refresh_token: {e:#}");
             HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
         }
     }
@@ -184,7 +183,7 @@ async fn factory_reset(auth: BearerAuth) -> impl Responder {
     match post("/factory-reset/v1", Some(auth)).await {
         Ok(response) => response,
         Err(e) => {
-            error!("factory_reset failed: {e}");
+            error!("factory_reset failed: {e:#}");
             HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
         }
     }
@@ -196,7 +195,7 @@ async fn reboot(auth: BearerAuth) -> impl Responder {
     match post("/reboot/v1", Some(auth)).await {
         Ok(response) => response,
         Err(e) => {
-            error!("reboot failed: {e}");
+            error!("reboot failed: {e:#}");
             HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
         }
     }
@@ -208,7 +207,7 @@ async fn reload_network(auth: BearerAuth) -> impl Responder {
     match post("/reload-network/v1", Some(auth)).await {
         Ok(response) => response,
         Err(e) => {
-            error!("reload-network failed: {e}");
+            error!("reload-network failed: {e:#}");
             HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
         }
     }
@@ -222,24 +221,13 @@ async fn post(path: &str, auth: Option<BearerAuth>) -> Result<HttpResponse> {
         }
     }
 
-    let stream = UnixStream::connect(std::env::var("SOCKET_PATH").expect("SOCKET_PATH missing"))
-        .await
-        .context("cannot create unix stream")?;
-
-    let (mut sender, conn) = http1::handshake(TokioIo::new(stream))
-        .await
-        .context("unix stream handshake failed")?;
-
-    actix_rt::spawn(async move {
-        if let Err(err) = conn.await {
-            error!("post connection failed: {:?}", err);
+    let mut sender = match sender().await {
+        Err(e) => {
+            error!("error creating request sender: {e}. socket might be broken. exit application");
+            std::process::exit(1)
         }
-    });
-
-    sender
-        .ready()
-        .await
-        .context("unix stream unexpectedly closed")?;
+        Ok(sender) => sender,
+    };
 
     let request = Request::builder()
         .uri(path)
@@ -264,6 +252,29 @@ async fn post(path: &str, auth: Option<BearerAuth>) -> Result<HttpResponse> {
     let body = String::from_utf8(body.to_bytes().to_vec()).context("get response body failed")?;
 
     Ok(HttpResponse::build(status_code).body(body))
+}
+
+async fn sender() -> Result<http1::SendRequest<Empty<Bytes>>> {
+    let stream = UnixStream::connect(std::env::var("SOCKET_PATH").expect("SOCKET_PATH missing"))
+        .await
+        .context("cannot create unix stream")?;
+
+    let (mut sender, conn) = http1::handshake(TokioIo::new(stream))
+        .await
+        .context("unix stream handshake failed")?;
+
+    actix_rt::spawn(async move {
+        if let Err(err) = conn.await {
+            error!("post connection failed: {:?}", err);
+        }
+    });
+
+    sender
+        .ready()
+        .await
+        .context("unix stream unexpectedly closed")?;
+
+    Ok(sender)
 }
 
 fn token() -> HttpResponse {

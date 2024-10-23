@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 name = "omnect-ui"
 readme = "README.md"
 repository = "git@github.com:omnect/omnect-ui.git"
-version = "0.2.1"
+version = "0.3.0"
 
 [dependencies]
 actix-files = "0.6"
@@ -15,7 +15,7 @@ actix-rt = "2.9"
 actix-web = { version = "4", features = ["rustls-0_22"] }
 actix-web-httpauth = "0.8"
 anyhow = "1.0"
-env_logger = "0.8"
+env_logger = { version = "0.11", default-features = false }
 http-body-util = { version = "0.1", default-features = false, features = [] }
 hyper = { version = "1.3", default-features = false, features = [
   "client",
