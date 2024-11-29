@@ -16,6 +16,8 @@ ARG TARGETARCH
 
 WORKDIR "/work"
 
+RUN curl -sSLf https://centrifugal.dev/install.sh | sh
+
 COPY --from=distroless /var/lib/dpkg/status.d /distroless_pkgs
 
 COPY src src
@@ -23,11 +25,6 @@ COPY Cargo.lock Cargo.lock
 COPY Cargo.toml Cargo.toml
 
 RUN cargo build --release --locked --target-dir ./build
-
-# replace by the following as soon as bookworm is suppoted
-# curl -s https://packagecloud.io/install/repositories/FZambia/centrifugo/script.deb.sh | bash
-RUN curl -LJO https://github.com/centrifugal/centrifugo/releases/download/v5.3.2/centrifugo_5.3.2_linux_${TARGETARCH}.tar.gz && \
-    tar -xzf centrifugo_*.tar.gz
 
 SHELL ["/bin/bash", "-c"]
 RUN <<EOT

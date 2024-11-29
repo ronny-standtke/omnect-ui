@@ -45,6 +45,14 @@ body {
   box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.5);
 }
 
+button.primary:hover {
+  background-color: rgba(103, 118, 128, .15);
+}
+
+button.error:hover {
+  background-color: rgba(207, 102, 121, .15);
+}
+
 .input-style {
   width: 100%;
   padding: 0.75rem 1rem;
@@ -77,6 +85,10 @@ h2 {
 
 .secondary {
   color: var(--secondary);
+}
+
+.error {
+  color: var(--error);
 }
 
 .commands {
@@ -123,7 +135,7 @@ h3 {
   display: none;
 }
 
-section {
+#stats {
   display: none;
 }
 
@@ -157,11 +169,76 @@ dialog[open] {
   background-color: white;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  padding: 0;
+  overflow: hidden;
 }
 
-.dialog-title {
-  font-weight: 700;
+dialog menu {
+  padding: 0;
+  margin: 0 0.5em 0 0;
+  display: flex;
+  flex-direction: row;
+  justify-content: end;
+  gap: .25em;
+}
+
+dialog menu button {
+  border-radius: 2px;
+  border: 0;
+  background-color: transparent;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-weight: 500;
+  padding: .5rem;
+}
+
+.dialog-title-bar {
+  margin: 0;
+  padding: .5em;
+  display: flex;
+  background-color: var(--primary);
+  font-weight: 600;
+  font-size: 1.25rem;
+  color: white;
+}
+
+.bg-error {
+  background-color: var(--error);
+  color: white;
+}
+
+.dialog-title-bar > p,
+.dialog-title-bar > span {
+  margin: 0 0 0 0;
+}
+
+.dialog-title-bar > .close-dialog {
+  position: absolute;
+  top: 0;
+  right: .25em;
+  rotate: 45deg;
+  user-select: none;
+  font-size: 2.25rem;
+  border: 0 none;
+  background: none;
+  color: white;
+  cursor: pointer;
+  outline: 0;
+}
+
+.dialog-content {
+  padding: 1em .5em;
+}
+
+#factory-reset-key-list {
+  margin: .5em 0;
+  display: flex;
+  flex-direction: column;
+  text-transform: capitalize;
+}
+
+.align-items-center {
+  align-items: center;
 }
 
 .loader {

@@ -9,9 +9,42 @@
 <body>
   <div class="content-wrapper">
 
-    <dialog id="spinner">
-      <p class="dialog-title"></p>
-      <span class="loader"></span>
+    <dialog id="alert">
+      <div class="dialog-title-bar bg-error">
+        <p class="dialog-title">
+          <button type="reset" class="close-dialog">+</button>
+        </p>
+      </div>
+      <div class="dialog-content"></div>
+      <menu>
+        <button type="reset" class="close-dialog">OK</button>
+      </menu>
+    </dialog>
+
+    <dialog id="spinner" class="align-items-center prevent-esc">
+      <div class="dialog-title-bar">
+          <p class="dialog-title"></p>
+      </div>
+      <div class="dialog-content">
+          <span class="loader"></span>
+      </div>
+    </dialog>
+
+    <dialog id="factory-reset-keys">
+      <form method="dialog">
+        <div class="dialog-title-bar">
+          <p>Reset device to factory</p>
+          <button type="reset" class="close-dialog">+</button>
+        </div>
+        <section class="dialog-content">
+          <span>Please click below which settings you want to keep.</span>
+          <div id="factory-reset-key-list"></div>
+        </section>
+        <menu>
+          <button type="reset" class="close-dialog primary">Cancel</button>
+          <button type="submit" class="error">Reset</button>
+        </menu>
+      </form>
     </dialog>
 
     <div class="logo-container">
@@ -25,9 +58,10 @@
       <input class="input-style" type="text" name="user" id="user" autocomplete="username" required />
       <input class="input-style" type="password" name="pass" id="password" autocomplete="current-password" required />
       <button class="btn" type="submit">login</button>
+      <p class="login-error error"></p>
     </form>
 
-    <section>
+    <section id="stats">
       <h3>Stats</h3>
       <div class="key-value-wrapper">
         <div class="key">online:</div>
@@ -75,338 +109,7 @@
     </section>
   </div>
   <script src="static/javascript/centrifuge.js"></script>
-  <script type="module">
-    var token = "";
-    var centrifuge;
-    var subOnlineStatus;
-    var subFactoryResetStatus;
-    var subSystemInfo;
-    var subTimeout;
-    var subNetworkStatus;
-    var xhr = new XMLHttpRequest();
-
-    document
-      .querySelector("#login")
-      .addEventListener("submit", await getLoginToken);
-    document.querySelector("#factory-reset").addEventListener("click", factoryReset);
-    document.querySelector("#reboot").addEventListener("click", reboot);
-    document
-      .querySelector("#reload-network")
-      .addEventListener("click", reloadNetwork);
-      document
-      .querySelector("#logout")
-      .addEventListener("click", logout);
-
-    const online = document.getElementById("online");
-    const osversion = document.getElementById("osversion");
-    const osname = document.getElementById("osname");
-    const waitOnlineTimeout = document.getElementById("wait-online-timeout");
-    const omnectDeviceServiceVersion = document.getElementById(
-      "omnect-device-service-version"
-    );
-    const azureSdkVersion = document.getElementById("azure-sdk-version");
-    const bootTime = document.getElementById("boot-time");
-    const factoryResetStatus = document.getElementById("factory-reset-status");
-    const networkStatus = document.getElementById("network-status");
-    const dialog = document.getElementById("spinner");
-    const dialogTitle = document.querySelector(".dialog-title")
-
-    function bytesToBase64(bytes) {
-      const binString = Array.from(bytes, (byte) =>
-        String.fromCodePoint(byte)
-      ).join("");
-      return btoa(binString);
-    }
-
-    async function logout() {
-      centrifuge.disconnect()
-      document.querySelector("#login").style.display = "flex"
-      document.querySelector("#logout").style.display = "none"
-      document.querySelector("section").style.display = "none"
-      networkStatus.innerHTML = "N/A"
-    }
-
-    async function getLoginToken(e) {
-      e.preventDefault()
-      const response = new Promise(function (resolve, reject) {
-        var user = document.getElementById("user").value;
-        var password = document.getElementById("password").value;
-        var creds = bytesToBase64(
-          new TextEncoder().encode(user + ":" + password)
-        );
-
-        xhr.open("POST", "token/login", true);
-        xhr.setRequestHeader("Authorization", "Basic " + creds);
-        xhr.onload = function () {
-          var status = xhr.status;
-          if (status == 200) {
-            console.log(xhr.response);
-            resolve(xhr.response);
-          } else {
-            reject(status);
-          }
-        };
-        xhr.send();
-      });
-
-      token = await response;
-
-      var centrifuge_url = "wss://" + window.location.hostname + ":8000/connection/websocket";
-      console.log(`centrifuge_url: ${centrifuge_url}`);
-
-      centrifuge = new Centrifuge(
-        centrifuge_url,
-        {
-          token: token,
-          getToken: getConnectionToken(),
-        }
-      );
-
-      centrifuge
-        .on("connecting", function (ctx) {
-          console.log(`connecting: ${ctx.code}, ${ctx.reason}`);
-        })
-        .on("connected", function (ctx) {
-          console.log(`connected over ${ctx.transport}`);
-          document.querySelector("#login").style.display = "none"
-          document.querySelector("#logout").style.display = "inline-block"
-          document.querySelector("section").style.display = "block"
-          document.querySelector("#password").value = ""
-          dialog.close()
-        })
-        .on("disconnected", function (ctx) {
-          console.log(`disconnected: ${ctx.code}, ${ctx.reason}`);
-          logout()
-        })
-        .connect();
-
-      centrifuge.history("OnlineStatus", { limit: 1 }).then(function (resp) {
-        console.log(resp);
-        if (0 < resp.publications.length) {
-          setOnlineStatus(resp.publications[0].data);
-        }
-      });
-
-      centrifuge.history("FactoryResetStatus", { limit: 1 }).then(function (resp) {
-        console.log(resp);
-        if (0 < resp.publications.length) {
-          setFactoryResetStatus(resp.publications[0].data);
-        }
-      });
-
-      centrifuge.history("SystemInfo", { limit: 1 }).then(function (resp) {
-        console.log(resp);
-        if (0 < resp.publications.length) {
-          setSystemInfo(resp.publications[0].data);
-        }
-      });
-
-      centrifuge.history("Timeouts", { limit: 1 }).then(function (resp) {
-        console.log(resp);
-        if (0 < resp.publications.length) {
-          setTimeout(resp.publications[0].data);
-        }
-      });
-
-      centrifuge.history("NetworkStatus", { limit: 1 }).then(function (resp) {
-        console.log(resp);
-        if (0 < resp.publications.length) {
-          setNetworkStatus(resp.publications[0].data);
-        }
-      });
-
-      subOnlineStatus = centrifuge.newSubscription("OnlineStatus");
-      subFactoryResetStatus = centrifuge.newSubscription("FactoryResetStatus");
-      subSystemInfo = centrifuge.newSubscription("SystemInfo");
-      subTimeout = centrifuge.newSubscription("Timeouts");
-      subNetworkStatus = centrifuge.newSubscription("NetworkStatus");
-
-      subOnlineStatus
-        .on("publication", function (ctx) {
-          setOnlineStatus(ctx.data);
-        })
-        .subscribe();
-
-      subFactoryResetStatus
-        .on("publication", function (ctx) {
-          setFactoryResetStatus(ctx.data);
-        })
-        .subscribe();
-
-      subSystemInfo
-        .on("publication", function (ctx) {
-          setSystemInfo(ctx.data);
-        })
-        .subscribe();
-
-      subTimeout
-        .on("publication", function (ctx) {
-          setTimeout(ctx.data);
-        })
-        .subscribe();
-
-      subNetworkStatus
-        .on("publication", function (ctx) {
-          setNetworkStatus(ctx.data);
-        })
-        .subscribe();
-    }
-
-    async function getConnectionToken() {
-      const response = new Promise(function (resolve, reject) {
-        xhr.open("Get", "token/refresh", true);
-        xhr.setRequestHeader("Authorization", "Bearer " + token);
-        xhr.onload = function () {
-          var status = xhr.status;
-          if (status == 200) {
-            console.log(xhr.response);
-            resolve(xhr.response);
-          } else {
-            reject(status);
-          }
-        };
-        xhr.send();
-      });
-
-      token = await response;
-      return token;
-    }
-
-    function setSystemInfo(data) {
-      if (typeof data["os"] !== "undefined") {
-        osversion.innerHTML = data["os"]["version"];
-        osname.innerHTML = data["os"]["name"];
-      }
-      if (typeof data["omnect_device_service_version"] !== "undefined") {
-        omnectDeviceServiceVersion.innerHTML =
-          data["omnect_device_service_version"];
-      }
-      if (typeof data["azure_sdk_version"] !== "undefined") {
-        azureSdkVersion.innerHTML = data["azure_sdk_version"];
-      }
-      if (typeof data["boot_time"] !== "undefined") {
-        bootTime.innerHTML = data["boot_time"];
-      }
-    }
-
-    function setOnlineStatus(data) {
-      if (typeof data["iothub"] !== "undefined") {
-        online.innerHTML = data["iothub"];
-      }
-    }
-
-    function setTimeout(data) {
-      if (typeof data["wait_online_timeout"] !== "undefined") {
-        waitOnlineTimeout.innerHTML =
-          data["wait_online_timeout"]["secs"] + "secs";
-      }
-    }
-
-    function setFactoryResetStatus(data) {
-      if (typeof data["factory_reset_status"] !== "undefined") {
-        factoryResetStatus.innerHTML =
-          data["factory_reset_status"];
-      }
-    }
-
-    function setNetworkStatus(data) {
-      if (typeof data["network_status"] !== "undefined") {
-        networkStatus.innerHTML = ""
-        for(const networkInterface of data["network_status"]) {
-          const stateElement = document.createElement("div")
-          stateElement.classList.add(networkInterface.online ? "online": "offline")
-
-          networkStatus.appendChild(networkStatusAddValue(networkInterface.name, stateElement))
-          networkStatus.appendChild(networkStatusAddValue("MAC", networkInterface.mac))
-          if(Object.hasOwn(networkInterface, "ipv4")) {
-            networkStatus.appendChild(networkStatusAddValue("IPv4"))
-            for(const [i, addr] of networkInterface.ipv4.addrs.entries()) {
-              const dhcpStatic = addr.dhcp ? "DHCP" : "Static"
-              networkStatus.appendChild(networkStatusAddValue(`Addr${i}`, `${addr.addr}/${addr.prefix_len} (${dhcpStatic})`))
-            }
-            networkStatus.appendChild(networkStatusAddValue("DNS", networkInterface.ipv4.dns))
-            networkStatus.appendChild(networkStatusAddValue("Gateways", networkInterface.ipv4.gateways))
-          }
-
-          if(Object.hasOwn(networkInterface, "ipv6")) {
-            networkStatus.appendChild(networkStatusAddValue("IPv6"))
-            for(const [i, addr] of networkInterface.ipv6.addrs.entries()) {
-              const dhcpStatic = addr.dhcp ? "DHCP" : "Static"
-              networkStatus.appendChild(networkStatusAddValue(`Addr${i}`, `${addr.addr}/${addr.prefix_len} (${dhcpStatic})`))
-            }
-            networkStatus.appendChild(networkStatusAddValue("DNS", networkInterface.ipv6.dns))
-            networkStatus.appendChild(networkStatusAddValue("Gateways", networkInterface.ipv6.gateways))
-          }
-
-          const spacer = document.createElement("div")
-          spacer.classList.add("spacer")
-
-          networkStatus.appendChild(spacer)
-        }
-      }
-    }
-
-    function networkStatusAddValue(key, value) {
-      const keyValueWrapper = document.createElement("div")
-      keyValueWrapper.classList.add("key-value-wrapper")
-      keyValueWrapper.classList.add("divider")
-
-      const keyElem = document.createElement("div")
-      keyElem.classList.add("key")
-      keyElem.textContent = `${key}:`
-
-      const valueElem = document.createElement("div")
-      if(value && value.nodeType) {
-        valueElem.appendChild(value)
-      } else if(value) {
-        valueElem.textContent = value
-      }
-
-      keyValueWrapper.appendChild(keyElem)
-      keyValueWrapper.appendChild(valueElem)
-
-      return keyValueWrapper
-    }
-
-    function networkStatusAddValues(key, value) {
-      const keyValueWrapper = document.createElement("div")
-      keyValueWrapper.classList.add("key-value-wrapper")
-
-      const keyElem = document.createElement("div")
-      keyElem.classList.add("key")
-      keyElem.textContent = `${key}:`
-
-      const valueElem = document.createElement("div")
-      valueElem.textContent = value.join(",")
-
-      keyValueWrapper.appendChild(keyElem)
-      keyValueWrapper.appendChild(valueElem)
-
-      return keyValueWrapper
-    }
-
-    function factoryReset() {
-      dialog.showModal()
-      dialogTitle.textContent = "Please wait. Device is resetting."
-      xhr.open("POST", "factory-reset", true);
-      xhr.setRequestHeader("Authorization", "Bearer " + token);
-      xhr.send();
-    }
-
-    function reboot() {
-      dialog.showModal()
-      dialogTitle.textContent = "Please wait. Device is rebooting."
-      xhr.open("POST", "reboot", true);
-      xhr.setRequestHeader("Authorization", "Bearer " + token);
-      xhr.send();
-    }
-
-    function reloadNetwork() {
-      xhr.open("POST", "reload-network", true);
-      xhr.setRequestHeader("Authorization", "Bearer " + token);
-      xhr.send();
-    }
-  </script>
+  <script src="static/javascript/omnect.js" type="module"></script>
 </body>
 
 </html>

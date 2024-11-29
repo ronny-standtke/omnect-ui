@@ -1,20 +1,28 @@
 use actix_files::{Files, NamedFile};
 use actix_web::{http::StatusCode, web, App, HttpResponse, HttpServer, Responder};
-use actix_web_httpauth::extractors::{basic::BasicAuth, bearer::BearerAuth};
 use anyhow::{Context, Result};
 use env_logger::{Builder, Env, Target};
-use http_body_util::{BodyExt, Empty};
-use hyper::{
-    Request,
-    {body::Bytes, client::conn::http1},
-};
+use http_body_util::BodyExt;
+use hyper::{client::conn::http1, Request};
 use hyper_util::rt::TokioIo;
 use jwt_simple::prelude::*;
 use log::{debug, error, info};
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 use tokio::{net::UnixStream, process::Command};
 
-const TOKEN_EXPIRE_HOURES: u64 = 2;
+mod middleware;
+
+#[derive(Deserialize)]
+struct FactoryResetInput {
+    preserve: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct FactoryResetPayload {
+    mode: u8,
+    preserve: Vec<String>,
+}
 
 #[actix_web::main]
 async fn main() {
@@ -79,17 +87,32 @@ async fn main() {
     let server = HttpServer::new(move || {
         App::new()
             .route("/", web::get().to(index))
-            .route("/factory-reset", web::post().to(factory_reset))
-            .route("/reboot", web::post().to(reboot))
-            .route("/reload-network", web::post().to(reload_network))
-            .route("/token/login", web::post().to(login_token))
-            .route("/token/refresh", web::get().to(refresh_token))
-            .service(
-                Files::new(
-                    "/static",
-                    std::fs::canonicalize("static").expect("static folder not found"),
-                )
+            .route(
+                "/factory-reset",
+                web::post().to(factory_reset).wrap(middleware::BearerAuthMw),
             )
+            .route(
+                "/reboot",
+                web::post().to(reboot).wrap(middleware::BearerAuthMw),
+            )
+            .route(
+                "/reload-network",
+                web::post()
+                    .to(reload_network)
+                    .wrap(middleware::BearerAuthMw),
+            )
+            .route(
+                "/token/login",
+                web::post().to(token).wrap(middleware::BasicAuthMw),
+            )
+            .route(
+                "/token/refresh",
+                web::get().to(token).wrap(middleware::BearerAuthMw),
+            )
+            .service(Files::new(
+                "/static",
+                std::fs::canonicalize("static").expect("static folder not found"),
+            ))
     })
     .bind_rustls_0_22(format!("0.0.0.0:{ui_port}"), tls_config)
     .expect("bind_rustls")
@@ -130,7 +153,7 @@ async fn index() -> actix_web::Result<NamedFile> {
     debug!("index() called");
 
     // trigger omnect-device-service to republish
-    match post("/republish/v1", None).await {
+    match post_with_empty_body("/republish/v1").await {
         Ok(response) => response,
         Err(e) => {
             error!("republish failed: {e:#}");
@@ -145,42 +168,18 @@ async fn index() -> actix_web::Result<NamedFile> {
     )?)
 }
 
-async fn login_token(auth: BasicAuth) -> impl Responder {
-    debug!("login_token() called");
+async fn factory_reset(body: web::Json<FactoryResetInput>) -> impl Responder {
+    debug!(
+        "factory_reset() called with preserved keys {}",
+        body.preserve.join(",")
+    );
 
-    match verify_user(auth) {
-        Ok(true) => token(),
-        Ok(false) => {
-            error!("login_token verify false");
-            HttpResponse::build(StatusCode::UNAUTHORIZED).finish()
-        }
-        Err(e) => {
-            error!("login_token: {e:#}");
-            HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
-        }
-    }
-}
+    let payload = FactoryResetPayload {
+        mode: 1,
+        preserve: body.preserve.clone(),
+    };
 
-async fn refresh_token(auth: BearerAuth) -> impl Responder {
-    debug!("refresh_token() called");
-
-    match verify_token(auth) {
-        Ok(true) => token(),
-        Ok(false) => {
-            error!("refresh_token verify false");
-            HttpResponse::build(StatusCode::UNAUTHORIZED).finish()
-        }
-        Err(e) => {
-            error!("refresh_token: {e:#}");
-            HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
-        }
-    }
-}
-
-async fn factory_reset(auth: BearerAuth) -> impl Responder {
-    debug!("factory_reset() called");
-
-    match post("/factory-reset/v1", Some(auth)).await {
+    match post_with_json_body("/factory-reset/v1", Some(payload)).await {
         Ok(response) => response,
         Err(e) => {
             error!("factory_reset failed: {e:#}");
@@ -189,10 +188,10 @@ async fn factory_reset(auth: BearerAuth) -> impl Responder {
     }
 }
 
-async fn reboot(auth: BearerAuth) -> impl Responder {
+async fn reboot() -> impl Responder {
     debug!("reboot() called");
 
-    match post("/reboot/v1", Some(auth)).await {
+    match post_with_empty_body("/reboot/v1").await {
         Ok(response) => response,
         Err(e) => {
             error!("reboot failed: {e:#}");
@@ -201,10 +200,10 @@ async fn reboot(auth: BearerAuth) -> impl Responder {
     }
 }
 
-async fn reload_network(auth: BearerAuth) -> impl Responder {
+async fn reload_network() -> impl Responder {
     debug!("reload_network() called");
 
-    match post("/reload-network/v1", Some(auth)).await {
+    match post_with_empty_body("/reload-network/v1").await {
         Ok(response) => response,
         Err(e) => {
             error!("reload-network failed: {e:#}");
@@ -213,14 +212,37 @@ async fn reload_network(auth: BearerAuth) -> impl Responder {
     }
 }
 
-async fn post(path: &str, auth: Option<BearerAuth>) -> Result<HttpResponse> {
-    if let Some(auth) = auth {
-        if !verify_token(auth)? {
-            error!("post {path} verify false");
-            return Ok(HttpResponse::build(StatusCode::UNAUTHORIZED).finish());
+async fn post_with_json_body(path: &str, body: impl Serialize) -> Result<HttpResponse> {
+    let json = match serde_json::to_value(body) {
+        Ok(r) => r,
+        Err(e) => {
+            error!("failed to serialize data error: {e:#}");
+            return Ok(HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish());
         }
-    }
+    };
 
+    let request = Request::builder()
+        .uri(path)
+        .method("POST")
+        .header("Host", "localhost")
+        .body(serde_json::to_string(&json).unwrap_or_default())
+        .context("build request failed")?;
+
+    post(request).await
+}
+
+async fn post_with_empty_body(path: &str) -> Result<HttpResponse> {
+    let request = Request::builder()
+        .uri(path)
+        .method("POST")
+        .header("Host", "localhost")
+        .body(String::new())
+        .context("build request failed")?;
+
+    post(request).await
+}
+
+async fn post(request: Request<String>) -> Result<HttpResponse> {
     let mut sender = match sender().await {
         Err(e) => {
             error!("error creating request sender: {e}. socket might be broken. exit application");
@@ -228,13 +250,6 @@ async fn post(path: &str, auth: Option<BearerAuth>) -> Result<HttpResponse> {
         }
         Ok(sender) => sender,
     };
-
-    let request = Request::builder()
-        .uri(path)
-        .method("POST")
-        .header("Host", "localhost")
-        .body(Empty::<Bytes>::new())
-        .context("build request failed")?;
 
     let res = sender
         .send_request(request)
@@ -254,7 +269,7 @@ async fn post(path: &str, auth: Option<BearerAuth>) -> Result<HttpResponse> {
     Ok(HttpResponse::build(status_code).body(body))
 }
 
-async fn sender() -> Result<http1::SendRequest<Empty<Bytes>>> {
+async fn sender() -> Result<http1::SendRequest<String>> {
     let stream = UnixStream::connect(std::env::var("SOCKET_PATH").expect("SOCKET_PATH missing"))
         .await
         .context("cannot create unix stream")?;
@@ -277,11 +292,11 @@ async fn sender() -> Result<http1::SendRequest<Empty<Bytes>>> {
     Ok(sender)
 }
 
-fn token() -> HttpResponse {
+async fn token() -> impl Responder {
     if let Ok(key) = std::env::var("CENTRIFUGO_TOKEN_HMAC_SECRET_KEY") {
         let key = HS256Key::from_bytes(key.as_bytes());
-        let claims =
-            Claims::create(Duration::from_hours(TOKEN_EXPIRE_HOURES)).with_subject("omnect-ui");
+        let claims = Claims::create(Duration::from_hours(middleware::TOKEN_EXPIRE_HOURS))
+            .with_subject("omnect-ui");
 
         if let Ok(token) = key.authenticate(claims) {
             return HttpResponse::Ok().body(token);
@@ -293,26 +308,4 @@ fn token() -> HttpResponse {
     };
 
     HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
-}
-
-fn verify_token(auth: BearerAuth) -> Result<bool> {
-    let key = std::env::var("CENTRIFUGO_TOKEN_HMAC_SECRET_KEY").context("missing jwt secret")?;
-    let key = HS256Key::from_bytes(key.as_bytes());
-    let options = VerificationOptions {
-        accept_future: true,
-        time_tolerance: Some(Duration::from_mins(15)),
-        max_validity: Some(Duration::from_hours(TOKEN_EXPIRE_HOURES)),
-        required_subject: Some("omnect-ui".to_string()),
-        ..Default::default()
-    };
-
-    Ok(key
-        .verify_token::<NoCustomClaims>(auth.token(), Some(options))
-        .is_ok())
-}
-
-fn verify_user(auth: BasicAuth) -> Result<bool> {
-    let user = std::env::var("LOGIN_USER").context("login_token: missing user")?;
-    let password = std::env::var("LOGIN_PASSWORD").context("login_token: missing password")?;
-    Ok(auth.user_id() == user && auth.password() == Some(&password))
 }

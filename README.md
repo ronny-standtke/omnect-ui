@@ -58,7 +58,9 @@ omnect-ui can be reached at https://DeviceHostnameOrIp:1977<br>
 Login with the configured credentials<br>
 ![login](docu/login.png)<br>
 Watch device status<br>
-![login](docu/main.png)
+![login](docu/main.png)<br>
+Reset device and choose options to keep<br>
+![factory-reset](docu/factory-reset.png)
 
 # License
 
