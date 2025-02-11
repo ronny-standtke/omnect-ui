@@ -114,7 +114,7 @@ async fn main() {
                 std::fs::canonicalize("static").expect("static folder not found"),
             ))
     })
-    .bind_rustls_0_22(format!("0.0.0.0:{ui_port}"), tls_config)
+    .bind_rustls_0_23(format!("0.0.0.0:{ui_port}"), tls_config)
     .expect("bind_rustls")
     .disable_signals()
     .run();
