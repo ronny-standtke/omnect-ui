@@ -16,20 +16,21 @@ ExecStart=/bin/bash -c 'FULL_TAG=$(docker load < /mnt/factory/oci_images/omnect-
                             --user $(id -u omnect_device_socket):$(id -g omnect_device_socket) \
                             -v /run/omnect-device-service:/socket \
                             -v /mnt/cert/priv:/cert \
+                            -v /var/lib/omnect-ui:/data \
                             -p ${UI_PORT}:${UI_PORT} \
-                            -p ${CENTRIFUGO_PORT}:${CENTRIFUGO_PORT} \
+                            -p ${CENTRIFUGO_HTTP_SERVER_PORT}:${CENTRIFUGO_HTTP_SERVER_PORT} \
                             -e UI_PORT=${UI_PORT} \
-                            -e CENTRIFUGO_ALLOW_HISTORY_FOR_CLIENT=true \
-                            -e CENTRIFUGO_ALLOW_SUBSCRIBE_FOR_CLIENT=true \
-                            -e CENTRIFUGO_ALLOWED_ORIGINS=* \
-                            -e CENTRIFUGO_API_KEY=${CENTRIFUGO_API_KEY} \
-                            -e CENTRIFUGO_HISTORY_SIZE=1 \
-                            -e CENTRIFUGO_HISTORY_TTL=720h \
-                            -e CENTRIFUGO_PORT=${CENTRIFUGO_PORT} \
-                            -e CENTRIFUGO_TLS=true \
-                            -e CENTRIFUGO_TLS_CERT=/cert/device_id_cert.pem \
-                            -e CENTRIFUGO_TLS_KEY=/cert/device_id_cert_key.pem \
-                            -e CENTRIFUGO_TOKEN_HMAC_SECRET_KEY=${CENTRIFUGO_TOKEN_HMAC_SECRET_KEY} \
+                            -e CENTRIFUGO_CHANNEL_WITHOUT_NAMESPACE_ALLOW_HISTORY_FOR_CLIENT=true \
+                            -e CENTRIFUGO_CHANNEL_WITHOUT_NAMESPACE_ALLOW_SUBSCRIBE_FOR_CLIENT=true \
+                            -e CENTRIFUGO_CLIENT_ALLOWED_ORIGINS=* \
+                            -e CENTRIFUGO_HTTP_API_KEY=${CENTRIFUGO_HTTP_API_KEY} \
+                            -e CENTRIFUGO_CHANNEL_WITHOUT_NAMESPACE_HISTORY_SIZE=1 \
+                            -e CENTRIFUGO_CHANNEL_WITHOUT_NAMESPACE_HISTORY_TTL=720h \
+                            -e CENTRIFUGO_HTTP_SERVER_PORT=${CENTRIFUGO_HTTP_SERVER_PORT} \
+                            -e CENTRIFUGO_HTTP_SERVER_TLS_ENABLED=true \
+                            -e CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM=/cert/device_id_cert.pem \
+                            -e CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM=/cert/device_id_cert_key.pem \
+                            -e CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY=${CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY} \
                             -e LOGIN_USER=${LOGIN_USER} \
                             -e LOGIN_PASSWORD=${LOGIN_PASSWORD} \
                             -e SOCKET_PATH=/socket/api.sock \

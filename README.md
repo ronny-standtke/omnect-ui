@@ -1,5 +1,5 @@
 # omnect-ui
-**Product page: https://www.omnect.io/home**
+Product page: <www.omnect.io>
 
 This module implements a web frontend and backend to provide omnect specific features in a local environment, where the device might not be connected to the azure cloud. In that case the device cannot be remotely controlled by [omnect-portal](https://cp.omnect.conplement.cloud/) and omnect-ui might be the alternative.
 
@@ -39,6 +39,7 @@ omnect-cli file copy-to-image \
 	-f publish_endpoints.json,factory:/etc/omnect/publish_endpoints.json \
 	-f omnect-ui.service,factory:/etc/systemd/system/omnect-ui.service \
 	-f create-fs-links.txt,factory:/etc/omnect/create-fs-links.txt \
+	-f omnect-ui.tmpfilesd,rootA:/usr/lib/tmpfiles.d/omnect-ui.conf \
 	-i my-omnect-os-image.wic
 
 # copy certificates

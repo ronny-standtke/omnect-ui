@@ -4,3 +4,4 @@
 centrifugo
 *.tar.gz
 *.env
+*.http

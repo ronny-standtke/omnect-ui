@@ -1,5 +1,14 @@
 use actix_files::{Files, NamedFile};
-use actix_web::{http::StatusCode, web, App, HttpResponse, HttpServer, Responder};
+use actix_session::{
+    config::{BrowserSession, CookieContentSecurity},
+    storage::CookieSessionStore,
+    Session, SessionMiddleware,
+};
+use actix_web::{
+    cookie::{Key, SameSite},
+    http::StatusCode,
+    web, App, HttpResponse, HttpServer, Responder,
+};
 use anyhow::{Context, Result};
 use env_logger::{Builder, Env, Target};
 use http_body_util::BodyExt;
@@ -84,35 +93,44 @@ async fn main() {
         _ => panic!("unexpected item found in key pem file"),
     };
 
+    fn session_middleware() -> SessionMiddleware<CookieSessionStore> {
+        SessionMiddleware::builder(CookieSessionStore::default(), Key::from(&[0; 64]))
+            .cookie_name(String::from("omnect-ui-session"))
+            .cookie_secure(true)
+            .session_lifecycle(BrowserSession::default())
+            .cookie_same_site(SameSite::Strict)
+            .cookie_content_security(CookieContentSecurity::Private)
+            .cookie_http_only(true)
+            .build()
+    }
+
     let server = HttpServer::new(move || {
         App::new()
             .route("/", web::get().to(index))
             .route(
                 "/factory-reset",
-                web::post().to(factory_reset).wrap(middleware::BearerAuthMw),
+                web::post().to(factory_reset).wrap(middleware::AuthMw),
             )
-            .route(
-                "/reboot",
-                web::post().to(reboot).wrap(middleware::BearerAuthMw),
-            )
+            .route("/reboot", web::post().to(reboot).wrap(middleware::AuthMw))
             .route(
                 "/reload-network",
-                web::post()
-                    .to(reload_network)
-                    .wrap(middleware::BearerAuthMw),
+                web::post().to(reload_network).wrap(middleware::AuthMw),
             )
             .route(
                 "/token/login",
-                web::post().to(token).wrap(middleware::BasicAuthMw),
+                web::post().to(token).wrap(middleware::AuthMw),
             )
             .route(
                 "/token/refresh",
-                web::get().to(token).wrap(middleware::BearerAuthMw),
+                web::get().to(token).wrap(middleware::AuthMw),
             )
+            .route("/logout", web::post().to(logout))
+            .service(web::redirect("/login", "/"))
             .service(Files::new(
                 "/static",
                 std::fs::canonicalize("static").expect("static folder not found"),
             ))
+            .wrap(session_middleware())
     })
     .bind_rustls_0_23(format!("0.0.0.0:{ui_port}"), tls_config)
     .expect("bind_rustls")
@@ -292,14 +310,17 @@ async fn sender() -> Result<http1::SendRequest<String>> {
     Ok(sender)
 }
 
-async fn token() -> impl Responder {
-    if let Ok(key) = std::env::var("CENTRIFUGO_TOKEN_HMAC_SECRET_KEY") {
+async fn token(session: Session) -> impl Responder {
+    if let Ok(key) = std::env::var("CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY") {
         let key = HS256Key::from_bytes(key.as_bytes());
         let claims = Claims::create(Duration::from_hours(middleware::TOKEN_EXPIRE_HOURS))
             .with_subject("omnect-ui");
 
         if let Ok(token) = key.authenticate(claims) {
-            return HttpResponse::Ok().body(token);
+            match session.insert("token", token.clone()) {
+                Ok(_) => return HttpResponse::Ok().body(token),
+                Err(_) => return HttpResponse::InternalServerError().body("Error."),
+            }
         } else {
             error!("token: cannot create token");
         };
@@ -308,4 +329,10 @@ async fn token() -> impl Responder {
     };
 
     HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
+}
+
+async fn logout(session: Session) -> impl Responder {
+    debug!("logout() called");
+    session.purge();
+    return HttpResponse::Ok();
 }

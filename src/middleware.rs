@@ -1,9 +1,10 @@
+use actix_session::SessionExt;
 use actix_web::{
     body::EitherBody,
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     Error, FromRequest, HttpMessage, HttpResponse,
 };
-use actix_web_httpauth::extractors::{basic::BasicAuth, bearer::BearerAuth};
+use actix_web_httpauth::extractors::basic::BasicAuth;
 use anyhow::{Context, Result};
 use jwt_simple::prelude::*;
 use log::error;
@@ -15,9 +16,9 @@ use std::{
 
 pub const TOKEN_EXPIRE_HOURS: u64 = 2;
 
-pub struct BearerAuthMw;
+pub struct AuthMw;
 
-impl<S, B> Transform<S, ServiceRequest> for BearerAuthMw
+impl<S, B> Transform<S, ServiceRequest> for AuthMw
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
     S::Future: 'static,
@@ -26,23 +27,23 @@ where
     type Response = ServiceResponse<EitherBody<B>>;
     type Error = Error;
     type InitError = ();
-    type Transform = BearerAuthMiddleware<S>;
+    type Transform = AuthMiddleware<S>;
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        ready(Ok(BearerAuthMiddleware {
+        ready(Ok(AuthMiddleware {
             service: Rc::new(service),
         }))
     }
 }
 
-pub struct BearerAuthMiddleware<S> {
+pub struct AuthMiddleware<S> {
     service: Rc<S>,
 }
 
 type LocalBoxFuture<T> = Pin<Box<dyn Future<Output = T> + 'static>>;
 
-impl<S, B> Service<ServiceRequest> for BearerAuthMiddleware<S>
+impl<S, B> Service<ServiceRequest> for AuthMiddleware<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
     S::Future: 'static,
@@ -58,33 +59,50 @@ where
         let service = Rc::clone(&self.service);
 
         Box::pin(async move {
-            let mut payload = req.take_payload().take();
+            let token = req.get_session().get::<String>("token").unwrap();
 
-            let auth = match BearerAuth::from_request(req.request(), &mut payload).await {
-                Ok(b) => b,
-                Err(_) => {
-                    error!("no auth header");
-                    return Ok(unauthorized_error(req).map_into_right_body());
+            if token.is_some()
+                && match verify_token(token) {
+                    Ok(true) => true,
+                    Ok(false) => false,
+                    Err(e) => {
+                        error!("user not authorized {}", e);
+                        false
+                    }
                 }
-            };
+            {
+                let res = service.call(req).await?;
+                return Ok(res.map_into_left_body());
+            } else {
+                let mut payload = req.take_payload().take();
 
-            match verify_token(auth) {
-                Ok(true) => {
-                    let res = service.call(req).await?;
-                    Ok(res.map_into_left_body())
-                }
-                Ok(false) => Ok(unauthorized_error(req).map_into_right_body()),
-                Err(e) => {
-                    error!("user not authorized {}", e);
-                    Ok(unauthorized_error(req).map_into_right_body())
+                let auth = match BasicAuth::from_request(req.request(), &mut payload).await {
+                    Ok(b) => b,
+                    Err(_) => {
+                        error!("no auth header");
+                        return Ok(unauthorized_error(req).map_into_right_body());
+                    }
+                };
+
+                match verify_user(auth) {
+                    Ok(true) => {
+                        let res = service.call(req).await?;
+                        Ok(res.map_into_left_body())
+                    }
+                    Ok(false) => Ok(unauthorized_error(req).map_into_right_body()),
+                    Err(e) => {
+                        error!("user not authorized {}", e);
+                        Ok(unauthorized_error(req).map_into_right_body())
+                    }
                 }
             }
         })
     }
 }
 
-pub fn verify_token(auth: BearerAuth) -> Result<bool> {
-    let key = std::env::var("CENTRIFUGO_TOKEN_HMAC_SECRET_KEY").context("missing jwt secret")?;
+pub fn verify_token(token: Option<String>) -> Result<bool> {
+    let key =
+        std::env::var("CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY").context("missing jwt secret")?;
     let key = HS256Key::from_bytes(key.as_bytes());
     let options = VerificationOptions {
         accept_future: true,
@@ -95,74 +113,8 @@ pub fn verify_token(auth: BearerAuth) -> Result<bool> {
     };
 
     Ok(key
-        .verify_token::<NoCustomClaims>(auth.token(), Some(options))
+        .verify_token::<NoCustomClaims>(&*token.unwrap(), Some(options))
         .is_ok())
-}
-
-pub struct BasicAuthMw;
-
-impl<S, B> Transform<S, ServiceRequest> for BasicAuthMw
-where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
-    S::Future: 'static,
-    B: 'static,
-{
-    type Response = ServiceResponse<EitherBody<B>>;
-    type Error = Error;
-    type InitError = ();
-    type Transform = BasicAuthMiddleware<S>;
-    type Future = Ready<Result<Self::Transform, Self::InitError>>;
-
-    fn new_transform(&self, service: S) -> Self::Future {
-        ready(Ok(BasicAuthMiddleware {
-            service: Rc::new(service),
-        }))
-    }
-}
-
-pub struct BasicAuthMiddleware<S> {
-    service: Rc<S>,
-}
-
-impl<S, B> Service<ServiceRequest> for BasicAuthMiddleware<S>
-where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
-    S::Future: 'static,
-    B: 'static,
-{
-    type Response = ServiceResponse<EitherBody<B>>;
-    type Error = Error;
-    type Future = LocalBoxFuture<Result<Self::Response, Self::Error>>;
-
-    forward_ready!(service);
-
-    fn call(&self, mut req: ServiceRequest) -> Self::Future {
-        let service = Rc::clone(&self.service);
-
-        Box::pin(async move {
-            let mut payload = req.take_payload().take();
-
-            let auth = match BasicAuth::from_request(req.request(), &mut payload).await {
-                Ok(b) => b,
-                Err(_) => {
-                    error!("no auth header");
-                    return Ok(unauthorized_error(req).map_into_right_body());
-                }
-            };
-
-            match verify_user(auth) {
-                Ok(true) => {
-                    let res = service.call(req).await?;
-                    Ok(res.map_into_left_body())
-                }
-                Ok(false) => Ok(unauthorized_error(req).map_into_right_body()),
-                Err(e) => {
-                    error!("user not authorized {}", e);
-                    Ok(unauthorized_error(req).map_into_right_body())
-                }
-            }
-        })
-    }
 }
 
 fn verify_user(auth: BasicAuth) -> Result<bool> {

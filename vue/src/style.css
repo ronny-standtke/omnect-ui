@@ -1,0 +1,52 @@
+:root {
+	--color-primary: #677680;
+	--color-background: #f4f5f7;
+	--color-header: #dee2e6;
+	--color-primary-rgb: 103, 118, 128;
+	--color-secondary: #0094b1;
+	--color-grey-30: #afb1b3;
+	--color-grey-10: #e1e4e6;
+	--color-grey-5: #f2f2f2;
+	--color-white-dimmed: #d9d9d9;
+	--color-notification-success-fill: #6ca425;
+	--color-notification-setup-fill: #de5c14;
+	--color-notification-setup-text: #f2d3c2;
+	--color-notification-update-fill: #008a96;
+	--color-notification-update-text: #c2eef2;
+	--color-notification-general-fill: #388bc7;
+	--color-notification-common-fill: #005d86;
+	--color-notification-general-text: #c2e4f2;
+	--color-notification-cancelled-fill: #ffb100;
+	--color-notification-pending-fill: #bd5ec0;
+	--color-text-primary: #292f33;
+	--color-fail: #b3101d;
+	font-size: 16px;
+}
+
+html {
+	overflow-y: none;
+}
+
+body {
+	color: var(--color-text-primary);
+	border-color: var(--color-grey-30);
+}
+
+.v-table__wrapper {
+	overflow: visible !important;
+}
+
+.scroll-shadows {
+	overflow: auto;
+	-webkit-overflow-scrolling: touch;
+
+	/* Shadow Cover TOP */
+	background: linear-gradient(white 30%, rgba(255, 255, 255, 0)) center top, /* Shadow Cover BOTTOM */
+		linear-gradient(rgba(255, 255, 255, 0), white 70%) center bottom, /* Shadow TOP */
+		radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0)) center top, /* Shadow BOTTOM */
+		radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0)) center bottom;
+
+	background-repeat: no-repeat;
+	background-size: 100% 40px, 100% 40px, 100% 14px, 100% 14px;
+	background-attachment: local, local, scroll, scroll;
+}
