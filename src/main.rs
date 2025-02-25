@@ -334,5 +334,5 @@ async fn token(session: Session) -> impl Responder {
 async fn logout(session: Session) -> impl Responder {
     debug!("logout() called");
     session.purge();
-    return HttpResponse::Ok();
+    HttpResponse::Ok()
 }

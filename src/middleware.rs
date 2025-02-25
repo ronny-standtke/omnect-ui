@@ -59,20 +59,18 @@ where
         let service = Rc::clone(&self.service);
 
         Box::pin(async move {
-            let token = req.get_session().get::<String>("token").unwrap();
-
-            if token.is_some()
-                && match verify_token(token) {
-                    Ok(true) => true,
-                    Ok(false) => false,
+            if let Some(token) = req.get_session().get::<String>("token").unwrap_or_default() {
+                match verify_token(token) {
+                    Ok(true) => {
+                        let res = service.call(req).await?;
+                        Ok(res.map_into_left_body())
+                    }
+                    Ok(false) => Ok(unauthorized_error(req).map_into_right_body()),
                     Err(e) => {
                         error!("user not authorized {}", e);
-                        false
+                        Ok(unauthorized_error(req).map_into_right_body())
                     }
                 }
-            {
-                let res = service.call(req).await?;
-                return Ok(res.map_into_left_body());
             } else {
                 let mut payload = req.take_payload().take();
 
@@ -100,7 +98,7 @@ where
     }
 }
 
-pub fn verify_token(token: Option<String>) -> Result<bool> {
+pub fn verify_token(token: String) -> Result<bool> {
     let key =
         std::env::var("CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY").context("missing jwt secret")?;
     let key = HS256Key::from_bytes(key.as_bytes());
@@ -113,7 +111,7 @@ pub fn verify_token(token: Option<String>) -> Result<bool> {
     };
 
     Ok(key
-        .verify_token::<NoCustomClaims>(&*token.unwrap(), Some(options))
+        .verify_token::<NoCustomClaims>(&token, Some(options))
         .is_ok())
 }
 
