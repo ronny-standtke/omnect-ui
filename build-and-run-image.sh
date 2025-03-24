@@ -9,22 +9,21 @@ centrifugo_port="8000"
 docker build \
   --build-arg=DOCKER_NAMESPACE=omnectweucopsacr.azurecr.io \
   --build-arg=VERSION_RUST_CONTAINER="${rust_version}" \
+  --build-arg=OMNECT_UI_BUILD_ARG="--features=mock" \
   -f Dockerfile \
   --progress=plain \
-  -t omnect-ui:"local_${omnect_ui_version}" .
+  -t omnect-ui-x86:"local_${omnect_ui_version}" .
 
 # ensure presence of:
 # /tmp/api.sock (normally created by a local instance of omnect-device-service)
-# ./temp/device_id_cert.pem and temp/device_id_cert_key.pem (certificate and key file as used on device)
+# ./temp/cert.pem and ./temp/key.pem (certificate and key file)
 docker run --rm \
-  -v $(pwd)/temp:/temp \
-  --mount type=bind,source=/tmp/api.sock,target=/temp/api.sock \
+  -v $(pwd)/temp:/cert \
+  -v /tmp:/socket \
   -u $(id -u):$(id -g) \
   -e RUST_LOG=debug \
   -e UI_PORT=1977 \
-  -e SOCKET_PATH=/temp/api.sock \
-  -e SSL_CERT_PATH=/temp/device_id_cert.pem \
-  -e SSL_KEY_PATH=/temp/device_id_cert_key.pem \
+  -e SOCKET_PATH=/socket/api.sock \
   -e LOGIN_USER=omnect-ui \
   -e LOGIN_PASSWORD=123 \
   -e CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY=my-token-secret-key \
@@ -35,11 +34,9 @@ docker run --rm \
   -e CENTRIFUGO_CHANNEL_WITHOUT_NAMESPACE_HISTORY_SIZE=1 \
   -e CENTRIFUGO_CHANNEL_WITHOUT_NAMESPACE_HISTORY_TTL=720h \
   -e CENTRIFUGO_HTTP_SERVER_TLS_ENABLED=true \
-  -e CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM=/temp/device_id_cert.pem \
-  -e CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM=/temp/device_id_cert_key.pem \
   -e CENTRIFUGO_ADMIN_ENABLED=true \
   -e CENTRIFUGO_ADMIN_PASSWORD=123 \
   -e CENTRIFUGO_ADMIN_SECRET=123 \
   -p "${omnect_ui_port}":"${omnect_ui_port}" \
   -p "${centrifugo_port}":"${centrifugo_port}" \
-  omnect-ui:"local_${omnect_ui_version}"
+  omnect-ui-x86:"local_${omnect_ui_version}"

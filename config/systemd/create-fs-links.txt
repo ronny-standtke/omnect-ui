@@ -1,2 +1,0 @@
-# source || destination
-/etc/systemd/system/omnect-ui.service /etc/systemd/system/multi-user.target.wants/omnect-ui.service
