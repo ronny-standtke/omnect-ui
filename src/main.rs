@@ -83,7 +83,11 @@ async fn main() {
 
     builder.target(Target::Stdout).init();
 
-    info!("module version: {}", env!("CARGO_PKG_VERSION"));
+    info!(
+        "module version: {} ({})",
+        env!("CARGO_PKG_VERSION"),
+        env!("GIT_SHORT_REV")
+    );
 
     let ui_port = std::env::var("UI_PORT")
         .expect("UI_PORT missing")

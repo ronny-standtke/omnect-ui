@@ -7,7 +7,8 @@ license = "MIT OR Apache-2.0"
 name = "omnect-ui"
 readme = "README.md"
 repository = "git@github.com:omnect/omnect-ui.git"
-version = "0.7.0"
+version = "0.7.1"
+build = "src/build.rs"
 
 [dependencies]
 actix-files = { version = "0.6", default-features = false }
