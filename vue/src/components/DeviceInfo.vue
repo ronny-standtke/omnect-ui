@@ -19,7 +19,3 @@ const displayItems = computed(() => Array.from(deviceInfo, ([title, value]) => (
     </dl>
   </div>
 </template>
-
-<style scoped>
-/* Add any specific styles for DeviceInfo.vue here */
-</style>

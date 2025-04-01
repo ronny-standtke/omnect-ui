@@ -20,14 +20,14 @@ export function useCentrifuge() {
 			})
 			centrifuge.value
 				.on("connecting", (ctx) => {
-					console.log(`connecting: ${ctx.code}, ${ctx.reason}`)
+					console.debug(`connecting: ${ctx.code}, ${ctx.reason}`)
 				})
 				.on("connected", (ctx) => {
-					console.log(`connected over ${ctx.transport}`)
+					console.debug(`connected over ${ctx.transport}`)
 					connectedEvent.trigger()
 				})
 				.on("disconnected", (ctx) => {
-					console.log(`disconnected: ${ctx.code}, ${ctx.reason}`)
+					console.debug(`disconnected: ${ctx.code}, ${ctx.reason}`)
 				})
 				.connect()
 		}
@@ -53,17 +53,17 @@ export function useCentrifuge() {
 			currentSub = centrifuge.value.newSubscription(channel)
 			currentSub
 				.on("publication", (ctx: PublicationContext) => {
-					console.log(`publication ${ctx.channel}`, ctx.data)
+					console.debug(`publication ${ctx.channel}`, ctx.data)
 					callback(ctx.data)
 				})
 				.on("subscribing", (ctx) => {
-					console.log(`subscribing: ${ctx.channel}, ${ctx.code}, ${ctx.reason}`)
+					console.debug(`subscribing: ${ctx.channel}, ${ctx.code}, ${ctx.reason}`)
 				})
 				.on("subscribed", (ctx) => {
-					console.log(`subscribed ${ctx.channel}`, ctx)
+					console.debug(`subscribed ${ctx.channel}`, ctx)
 				})
 				.on("unsubscribed", (ctx) => {
-					console.log(`unsubscribed: ${ctx.channel}, ${ctx.code}, ${ctx.reason}`)
+					console.debug(`unsubscribed: ${ctx.channel}, ${ctx.code}, ${ctx.reason}`)
 				})
 		}
 		if (currentSub.state === SubscriptionState.Unsubscribed) {

@@ -1,22 +1,51 @@
 <script setup lang="ts">
+import axios from "axios"
 import { type Ref, onBeforeMount, ref } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useDisplay } from "vuetify"
+import BaseSideBar from "./components/BaseSideBar.vue"
 import OmnectLogo from "./components/OmnectLogo.vue"
+import OverlaySpinner from "./components/OverlaySpinner.vue"
 import UserMenu from "./components/UserMenu.vue"
 import { useCentrifuge } from "./composables/useCentrifugo"
+import { useOverlaySpinner } from "./composables/useOverlaySpinner"
 import { useSnackbar } from "./composables/useSnackbar"
+import { CentrifugeSubscriptionType } from "./enums/centrifuge-subscription-type.enum"
+import type { UpdateValidationStatus } from "./types/update-validation-status"
+
+axios.defaults.validateStatus = (_) => true
 
 const { snackbarState } = useSnackbar()
-
-const { initializeCentrifuge } = useCentrifuge()
+const { overlaySpinnerState, reset, updateDone } = useOverlaySpinner()
+const { initializeCentrifuge, onConnected, history, subscribe } = useCentrifuge()
 const { lgAndUp } = useDisplay()
 const router = useRouter()
 const route = useRoute()
 const showSideBar: Ref<boolean> = ref(lgAndUp.value)
 
+onConnected(() => {
+	if (!overlaySpinnerState.isUpdateRunning) {
+		reset()
+		return
+	}
+
+	history(checkUpdateState, CentrifugeSubscriptionType.UpdateStatus)
+	subscribe(checkUpdateState, CentrifugeSubscriptionType.UpdateStatus)
+	updateDone.trigger()
+})
+
+const checkUpdateState = (data: UpdateValidationStatus) => {
+	if (overlaySpinnerState.isUpdateRunning && (data.status === "Succeeded" || data.status === "Recovered")) {
+		reset()
+	}
+}
+
 const toggleSideBar = () => {
 	showSideBar.value = !showSideBar.value
+}
+
+const updateSidebarVisibility = (visible: boolean) => {
+	showSideBar.value = visible
 }
 
 onBeforeMount(async () => {
@@ -46,6 +75,8 @@ onBeforeMount(async () => {
         </div>
       </template>
     </v-app-bar>
+    <BaseSideBar v-if="route.path !== '/login'" :showSideBar="showSideBar"
+      @drawerVisibiltyChanged="updateSidebarVisibility"></BaseSideBar>
     <v-main>
       <RouterView></RouterView>
       <v-snackbar v-model="snackbarState.snackbar" :color="snackbarState.color" :timeout="snackbarState.timeout">
@@ -54,6 +85,8 @@ onBeforeMount(async () => {
           <v-btn icon=" mdi-close" @click="snackbarState.snackbar = false"></v-btn>
         </template>
       </v-snackbar>
+      <OverlaySpinner :overlay="overlaySpinnerState.overlay" :title="overlaySpinnerState.title"
+        :text="overlaySpinnerState.text" />
     </v-main>
   </v-app>
 </template>

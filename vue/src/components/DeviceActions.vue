@@ -9,12 +9,18 @@ import { CentrifugeSubscriptionType } from "../enums/centrifuge-subscription-typ
 import type { FactoryResetKeys } from "../types"
 
 const { subscribe, history } = useCentrifuge()
-const { snackbarState } = useSnackbar()
+const { showError } = useSnackbar()
 const router = useRouter()
 const selectedFactoryResetKeys: Ref<string[]> = ref([])
 const factoryResetDialog = ref(false)
 const rebootDialog = ref(false)
 const factoryResetKeys: Ref<FactoryResetKeys | undefined> = ref(undefined)
+
+const factoryResetPayload = computed(() => {
+	return {
+		preserve: selectedFactoryResetKeys.value
+	}
+})
 
 const emit = defineEmits<{
 	(event: "rebootInProgress"): void
@@ -37,7 +43,7 @@ const {
 	onFetchResponse: onResetSuccess,
 	execute: reset,
 	isFetching: resetFetching
-} = useFetch("factory-reset", { immediate: false }).post(JSON.stringify({ preserve: selectedFactoryResetKeys.value }))
+} = useFetch("factory-reset", { immediate: false }).post(factoryResetPayload)
 
 const loading = computed(() => rebootFetching.value || resetFetching.value)
 
@@ -67,13 +73,6 @@ onResetError(() => {
 	}
 })
 
-const showError = (errorMsg: string) => {
-	snackbarState.msg = errorMsg
-	snackbarState.color = "error"
-	snackbarState.timeout = -1
-	snackbarState.snackbar = true
-}
-
 const updateFactoryResetKeys = (data: FactoryResetKeys) => {
 	factoryResetKeys.value = data
 }
@@ -85,43 +84,44 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-y-4 items-start">
-    <div class="text-h4 text-secondary border-b w-100">Commands</div>
-    <v-btn :prepend-icon="'mdi-restart'" variant="text">
-      Reboot
-      <v-dialog v-model="rebootDialog" activator="parent" max-width="340" :no-click-animation="true" persistent
-        @keydown.esc="rebootDialog = false">
-        <DialogContent title="Reboot device" dialog-type="default" :show-close="true" @close="rebootDialog = false">
-          <div class="flex flex-col gap-2 mb-8">
-            Do you really want to restart the device?
-          </div>
-          <div class="flex justify-end -mr-4 mt-4">
-            <v-btn variant="text" color="warning" :loading="loading" :disabled="loading"
-              @click="reboot(false)">Reboot</v-btn>
-            <v-btn variant="text" color="primary" @click="rebootDialog = false">Cancel</v-btn>
-          </div>
-        </DialogContent>
-      </v-dialog>
-    </v-btn>
-    <v-btn :prepend-icon="'mdi-undo-variant'" variant="text">
-      Factory Reset
-      <v-dialog v-model="factoryResetDialog" activator="parent" max-width="340" :no-click-animation="true" persistent
-        @keydown.esc="factoryResetDialog = false">
-        <DialogContent title="Factory reset" dialog-type="default" :show-close="true"
-          @close="factoryResetDialog = false">
-          <div class="flex flex-col gap-2 mb-8">
-            <v-checkbox-btn v-for="(option, index) in factoryResetKeys?.keys" :label="option"
-              v-model="selectedFactoryResetKeys" :value="option" :key="index"></v-checkbox-btn>
-          </div>
-          <div class="flex justify-end -mr-4 mt-4">
-            <v-btn variant="text" color="error" :loading="loading" :disabled="loading"
-              @click="reset(false)">Reset</v-btn>
-            <v-btn variant="text" color="primary" @click="factoryResetDialog = false">Cancel</v-btn>
-          </div>
-        </DialogContent>
-      </v-dialog>
-    </v-btn>
-  </div>
+	<div class="flex flex-col gap-y-4 items-start">
+		<div class="text-h4 text-secondary border-b w-100">Commands</div>
+		<v-btn :prepend-icon="'mdi-restart'" variant="text">
+			Reboot
+			<v-dialog v-model="rebootDialog" activator="parent" max-width="340" :no-click-animation="true" persistent
+				@keydown.esc="rebootDialog = false">
+				<DialogContent title="Reboot device" dialog-type="default" :show-close="true"
+					@close="rebootDialog = false">
+					<div class="flex flex-col gap-2 mb-8">
+						Do you really want to restart the device?
+					</div>
+					<div class="flex justify-end -mr-4 mt-4">
+						<v-btn variant="text" color="warning" :loading="loading" :disabled="loading"
+							@click="reboot(false)">Reboot</v-btn>
+						<v-btn variant="text" color="primary" @click="rebootDialog = false">Cancel</v-btn>
+					</div>
+				</DialogContent>
+			</v-dialog>
+		</v-btn>
+		<v-btn :prepend-icon="'mdi-undo-variant'" variant="text">
+			Factory Reset
+			<v-dialog v-model="factoryResetDialog" activator="parent" max-width="340" :no-click-animation="true"
+				persistent @keydown.esc="factoryResetDialog = false">
+				<DialogContent title="Factory reset" dialog-type="default" :show-close="true"
+					@close="factoryResetDialog = false">
+					<div class="flex flex-col gap-2 mb-8">
+						<v-checkbox-btn v-for="(option, index) in factoryResetKeys?.keys" :label="option"
+							v-model="selectedFactoryResetKeys" :value="option" :key="index"></v-checkbox-btn>
+					</div>
+					<div class="flex justify-end -mr-4 mt-4">
+						<v-btn variant="text" color="error" :loading="loading" :disabled="loading"
+							@click="reset(false)">Reset</v-btn>
+						<v-btn variant="text" color="primary" @click="factoryResetDialog = false">Cancel</v-btn>
+					</div>
+				</DialogContent>
+			</v-dialog>
+		</v-btn>
+	</div>
 </template>
 
 <style scoped></style>

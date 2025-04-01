@@ -9,5 +9,19 @@ export const useSnackbar = createGlobalState(() => {
 		snackbar: false
 	})
 
-	return { snackbarState }
+	const reset = () => {
+		snackbarState.color = ""
+		snackbarState.timeout = -1
+		snackbarState.msg = ""
+		snackbarState.snackbar = false
+	}
+
+	const showError = (msg: string) => {
+		snackbarState.color = "error"
+		snackbarState.timeout = -1
+		snackbarState.msg = msg
+		snackbarState.snackbar = true
+	}
+
+	return { snackbarState, reset, showError }
 })

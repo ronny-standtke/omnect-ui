@@ -9,16 +9,9 @@ import type { NetworkStatus } from "../types"
 import KeyValuePair from "./ui-components/KeyValuePair.vue"
 
 const networkStatus: Ref<NetworkStatus | undefined> = ref(undefined)
-const { snackbarState } = useSnackbar()
+const { snackbarState, showError } = useSnackbar()
 const router = useRouter()
 const { history, subscribe } = useCentrifuge()
-
-const showError = (errorMsg: string) => {
-	snackbarState.msg = errorMsg
-	snackbarState.color = "error"
-	snackbarState.timeout = -1
-	snackbarState.snackbar = true
-}
 
 const showSuccess = (successMsg: string) => {
 	snackbarState.msg = successMsg
@@ -37,7 +30,7 @@ const {
 } = useFetch("reload-network", { immediate: false }).post()
 
 onReloadNetworkSuccess(() => {
-	showSuccess("Reload network successful")
+	showSuccess("Reload network successful.")
 })
 
 onReloadNetworkError(() => {

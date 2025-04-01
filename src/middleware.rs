@@ -2,10 +2,11 @@ use actix_session::SessionExt;
 use actix_web::{
     body::EitherBody,
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    web::Data,
     Error, FromRequest, HttpMessage, HttpResponse,
 };
 use actix_web_httpauth::extractors::basic::BasicAuth;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use jwt_simple::prelude::*;
 use log::error;
 use std::{
@@ -13,6 +14,8 @@ use std::{
     pin::Pin,
     rc::Rc,
 };
+
+use crate::api::Api;
 
 pub const TOKEN_EXPIRE_HOURS: u64 = 2;
 
@@ -59,30 +62,30 @@ where
         let service = Rc::clone(&self.service);
 
         Box::pin(async move {
-            if let Some(token) = req.get_session().get::<String>("token").unwrap_or_default() {
-                match verify_token(token) {
-                    Ok(true) => {
-                        let res = service.call(req).await?;
-                        Ok(res.map_into_left_body())
-                    }
-                    Ok(false) => Ok(unauthorized_error(req).map_into_right_body()),
-                    Err(e) => {
-                        error!("user not authorized {}", e);
-                        Ok(unauthorized_error(req).map_into_right_body())
-                    }
+            let api_config = req.app_data::<Data<Api>>().cloned().unwrap();
+
+            let token = match req.get_session().get::<String>("token") {
+                Ok(token) => token.unwrap_or_default(),
+                Err(e) => {
+                    error!("failed to get session. {e:#}");
+                    String::new()
                 }
+            };
+
+            if !token.is_empty()
+                && verify_token(&token, &api_config.centrifugo_client_token_hmac_secret_key)
+                    .is_ok_and(|res| res)
+            {
+                let res = service.call(req).await?;
+                Ok(res.map_into_left_body())
             } else {
                 let mut payload = req.take_payload().take();
 
-                let auth = match BasicAuth::from_request(req.request(), &mut payload).await {
-                    Ok(b) => b,
-                    Err(_) => {
-                        error!("no auth header");
-                        return Ok(unauthorized_error(req).map_into_right_body());
-                    }
+                let Ok(auth) = BasicAuth::from_request(req.request(), &mut payload).await else {
+                    return Ok(unauthorized_error(req).map_into_right_body());
                 };
 
-                match verify_user(auth) {
+                match verify_user(auth, &api_config.username, &api_config.password) {
                     Ok(true) => {
                         let res = service.call(req).await?;
                         Ok(res.map_into_left_body())
@@ -98,10 +101,8 @@ where
     }
 }
 
-pub fn verify_token(token: String) -> Result<bool> {
-    let key =
-        std::env::var("CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY").context("missing jwt secret")?;
-    let key = HS256Key::from_bytes(key.as_bytes());
+pub fn verify_token(token: &str, centrifugo_client_token_hmac_secret_key: &str) -> Result<bool> {
+    let key = HS256Key::from_bytes(centrifugo_client_token_hmac_secret_key.as_bytes());
     let options = VerificationOptions {
         accept_future: true,
         time_tolerance: Some(Duration::from_mins(15)),
@@ -111,14 +112,12 @@ pub fn verify_token(token: String) -> Result<bool> {
     };
 
     Ok(key
-        .verify_token::<NoCustomClaims>(&token, Some(options))
+        .verify_token::<NoCustomClaims>(token, Some(options))
         .is_ok())
 }
 
-fn verify_user(auth: BasicAuth) -> Result<bool> {
-    let user = std::env::var("LOGIN_USER").context("login_token: missing user")?;
-    let password = std::env::var("LOGIN_PASSWORD").context("login_token: missing password")?;
-    Ok(auth.user_id() == user && auth.password() == Some(&password))
+fn verify_user(auth: BasicAuth, username: &str, password: &str) -> Result<bool> {
+    Ok(auth.user_id() == username && auth.password() == Some(password))
 }
 
 fn unauthorized_error(req: ServiceRequest) -> ServiceResponse {

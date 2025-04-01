@@ -1,40 +1,38 @@
-use actix_files::{Files, NamedFile};
+mod api;
+mod middleware;
+mod socket_client;
+
+use crate::api::Api;
+use actix_files::Files;
+use actix_multipart::form::MultipartFormConfig;
 use actix_session::{
     config::{BrowserSession, CookieContentSecurity},
     storage::CookieSessionStore,
-    Session, SessionMiddleware,
+    SessionMiddleware,
 };
 use actix_web::{
     body::MessageBody,
     cookie::{Key, SameSite},
-    http::StatusCode,
     web::{self},
     App, HttpResponse, HttpServer, Responder,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use env_logger::{Builder, Env, Target};
-use http_body_util::BodyExt;
-use hyper::{client::conn::http1, Request};
-use hyper_util::rt::TokioIo;
-use jwt_simple::prelude::*;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::fs::File;
 use std::io::Write;
-use std::sync::LazyLock;
-use tokio::{net::UnixStream, process::Command};
+use tokio::process::Command;
 
-mod middleware;
+const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
+const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
 
-#[derive(Deserialize)]
-struct FactoryResetInput {
-    preserve: Vec<String>,
-}
-
-#[derive(Serialize)]
-struct FactoryResetPayload {
-    mode: u8,
-    preserve: Vec<String>,
+macro_rules! update_os_path {
+    () => {{
+        static DATA_DIR_PATH_DEFAULT: &'static str = "/var/lib/omnect-ui";
+        std::env::var("DATA_DIR_PATH").unwrap_or(DATA_DIR_PATH_DEFAULT.to_string())
+    }};
 }
 
 #[derive(Serialize)]
@@ -62,9 +60,6 @@ struct CreateCertResponse {
 
 const CERT_PATH: &str = "/cert/cert.pem";
 const KEY_PATH: &str = "/cert/key.pem";
-
-static ODS_SOCKET_PATH: LazyLock<String> =
-    LazyLock::new(|| std::env::var("SOCKET_PATH").expect("SOCKET_PATH missing"));
 
 #[actix_web::main]
 async fn main() {
@@ -122,6 +117,8 @@ async fn main() {
         _ => panic!("unexpected item found in key pem file"),
     };
 
+    fs::exists("/data").expect("data dir /data is missing");
+
     fn session_middleware() -> SessionMiddleware<CookieSessionStore> {
         SessionMiddleware::builder(CookieSessionStore::default(), Key::from(&[0; 64]))
             .cookie_name(String::from("omnect-ui-session"))
@@ -133,33 +130,70 @@ async fn main() {
             .build()
     }
 
+    let ods_socket_path = std::env::var("SOCKET_PATH").expect("env SOCKET_PATH is missing");
+    let centrifugo_client_token_hmac_secret_key =
+        std::env::var("CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY").expect("missing jwt secret");
+    let username = std::env::var("LOGIN_USER").expect("login_token: missing user");
+    let password = std::env::var("LOGIN_PASSWORD").expect("login_token: missing password");
+    let index_html =
+        std::fs::canonicalize("static/index.html").expect("static/index.html not found");
+
     let server = HttpServer::new(move || {
         App::new()
-            .route("/", web::get().to(index))
+            .wrap(session_middleware())
+            .app_data(
+                MultipartFormConfig::default()
+                    .total_limit(UPLOAD_LIMIT_BYTES)
+                    .memory_limit(MEMORY_LIMIT_BYTES),
+            )
+            .app_data(Api::new(
+                &ods_socket_path,
+                &update_os_path!(),
+                &centrifugo_client_token_hmac_secret_key,
+                &username,
+                &password,
+                &index_html.to_path_buf(),
+            ))
+            .route("/", web::get().to(Api::index))
             .route(
                 "/factory-reset",
-                web::post().to(factory_reset).wrap(middleware::AuthMw),
+                web::post().to(Api::factory_reset).wrap(middleware::AuthMw),
             )
-            .route("/reboot", web::post().to(reboot).wrap(middleware::AuthMw))
+            .route(
+                "/reboot",
+                web::post().to(Api::reboot).wrap(middleware::AuthMw),
+            )
             .route(
                 "/reload-network",
-                web::post().to(reload_network).wrap(middleware::AuthMw),
+                web::post().to(Api::reload_network).wrap(middleware::AuthMw),
+            )
+            .route(
+                "/update/file",
+                web::post().to(Api::save_file).wrap(middleware::AuthMw),
+            )
+            .route(
+                "/update/load",
+                web::post().to(Api::load_update).wrap(middleware::AuthMw),
+            )
+            .route(
+                "/update/run",
+                web::post().to(Api::run_update).wrap(middleware::AuthMw),
             )
             .route(
                 "/token/login",
-                web::post().to(token).wrap(middleware::AuthMw),
+                web::post().to(Api::token).wrap(middleware::AuthMw),
             )
             .route(
                 "/token/refresh",
-                web::get().to(token).wrap(middleware::AuthMw),
+                web::get().to(Api::token).wrap(middleware::AuthMw),
             )
-            .route("/logout", web::post().to(logout))
-            .service(web::redirect("/login", "/"))
+            .route("/version", web::get().to(Api::version))
+            .route("/logout", web::post().to(Api::logout))
             .service(Files::new(
                 "/static",
                 std::fs::canonicalize("static").expect("static folder not found"),
             ))
-            .wrap(session_middleware())
+            .default_service(web::route().to(Api::index))
     })
     .bind_rustls_0_23(format!("0.0.0.0:{ui_port}"), tls_config)
     .expect("bind_rustls")
@@ -228,7 +262,7 @@ async fn create_module_certificate() -> impl Responder {
     let ori_socket_path = iotedge_workloaduri.to_string();
     let socket_path = ori_socket_path.strip_prefix("unix://").unwrap();
 
-    match post_with_json_body(&path, Some(payload), socket_path).await {
+    match socket_client::post_with_json_body(&path, payload, socket_path).await {
         Ok(response) => {
             let body = response.into_body();
             let body_bytes = body.try_into_bytes().unwrap();
@@ -252,178 +286,4 @@ async fn create_module_certificate() -> impl Responder {
             HttpResponse::InternalServerError().finish()
         }
     }
-}
-
-async fn index() -> actix_web::Result<NamedFile> {
-    debug!("index() called");
-
-    // trigger omnect-device-service to republish
-    match post_with_empty_body("/republish/v1", &ODS_SOCKET_PATH).await {
-        Ok(response) => response,
-        Err(e) => {
-            error!("republish failed: {e:#}");
-            return Err(actix_web::error::ErrorInternalServerError(
-                "republish failed",
-            ));
-        }
-    };
-
-    Ok(NamedFile::open(
-        std::fs::canonicalize("static/index.html").expect("static/index.html not found"),
-    )?)
-}
-
-async fn factory_reset(body: web::Json<FactoryResetInput>) -> impl Responder {
-    debug!(
-        "factory_reset() called with preserved keys {}",
-        body.preserve.join(",")
-    );
-
-    let payload = FactoryResetPayload {
-        mode: 1,
-        preserve: body.preserve.clone(),
-    };
-
-    match post_with_json_body("/factory-reset/v1", Some(payload), &ODS_SOCKET_PATH).await {
-        Ok(response) => response,
-        Err(e) => {
-            error!("factory_reset failed: {e:#}");
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
-async fn reboot() -> impl Responder {
-    debug!("reboot() called");
-
-    match post_with_empty_body("/reboot/v1", &ODS_SOCKET_PATH).await {
-        Ok(response) => response,
-        Err(e) => {
-            error!("reboot failed: {e:#}");
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
-async fn reload_network() -> impl Responder {
-    debug!("reload_network() called");
-
-    match post_with_empty_body("/reload-network/v1", &ODS_SOCKET_PATH).await {
-        Ok(response) => response,
-        Err(e) => {
-            error!("reload-network failed: {e:#}");
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
-async fn post_with_json_body(
-    path: &str,
-    body: impl Serialize,
-    socket_path: &str,
-) -> Result<HttpResponse> {
-    let json = match serde_json::to_value(body) {
-        Ok(r) => r,
-        Err(e) => {
-            error!("failed to serialize data error: {e:#}");
-            return Ok(HttpResponse::InternalServerError().finish());
-        }
-    };
-
-    let request = Request::builder()
-        .uri(path)
-        .method("POST")
-        .header("Host", "localhost")
-        .body(serde_json::to_string(&json).unwrap_or_default())
-        .context("build request failed")?;
-
-    post(request, socket_path).await
-}
-
-async fn post_with_empty_body(path: &str, socket_path: &str) -> Result<HttpResponse> {
-    let request = Request::builder()
-        .uri(path)
-        .method("POST")
-        .header("Host", "localhost")
-        .body(String::new())
-        .context("build request failed")?;
-
-    post(request, socket_path).await
-}
-
-async fn post(request: Request<String>, socket_path: &str) -> Result<HttpResponse> {
-    let mut sender = match sender(socket_path).await {
-        Err(e) => {
-            error!("error creating request sender: {e}. socket might be broken. exit application");
-            std::process::exit(1)
-        }
-        Ok(sender) => sender,
-    };
-
-    let res = sender
-        .send_request(request)
-        .await
-        .context("send request failed")?;
-
-    let status_code =
-        StatusCode::from_u16(res.status().as_u16()).context("get status code failed")?;
-
-    let body = res
-        .collect()
-        .await
-        .context("collect response body failed")?;
-
-    let body = String::from_utf8(body.to_bytes().to_vec()).context("get response body failed")?;
-
-    Ok(HttpResponse::build(status_code).body(body))
-}
-
-async fn sender(socket_path: &str) -> Result<http1::SendRequest<String>> {
-    let stream = UnixStream::connect(socket_path)
-        .await
-        .context("cannot create unix stream")?;
-
-    let (mut sender, conn) = http1::handshake(TokioIo::new(stream))
-        .await
-        .context("unix stream handshake failed")?;
-
-    actix_rt::spawn(async move {
-        if let Err(err) = conn.await {
-            error!("post connection failed: {:?}", err);
-        }
-    });
-
-    sender
-        .ready()
-        .await
-        .context("unix stream unexpectedly closed")?;
-
-    Ok(sender)
-}
-
-async fn token(session: Session) -> impl Responder {
-    if let Ok(key) = std::env::var("CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY") {
-        let key = HS256Key::from_bytes(key.as_bytes());
-        let claims = Claims::create(Duration::from_hours(middleware::TOKEN_EXPIRE_HOURS))
-            .with_subject("omnect-ui");
-
-        if let Ok(token) = key.authenticate(claims) {
-            match session.insert("token", token.clone()) {
-                Ok(_) => return HttpResponse::Ok().body(token),
-                Err(_) => return HttpResponse::InternalServerError().body("Error."),
-            }
-        } else {
-            error!("token: cannot create token");
-        };
-    } else {
-        error!("token: missing secret key");
-    };
-
-    HttpResponse::InternalServerError().finish()
-}
-
-async fn logout(session: Session) -> impl Responder {
-    debug!("logout() called");
-    session.purge();
-    HttpResponse::Ok()
 }

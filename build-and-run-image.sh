@@ -37,6 +37,7 @@ docker run --rm \
   -e CENTRIFUGO_ADMIN_ENABLED=true \
   -e CENTRIFUGO_ADMIN_PASSWORD=123 \
   -e CENTRIFUGO_ADMIN_SECRET=123 \
+  -e DATA_DIR_PATH=$(pwd)/temp/data \
   -p "${omnect_ui_port}":"${omnect_ui_port}" \
   -p "${centrifugo_port}":"${centrifugo_port}" \
   omnect-ui-x86:"local_${omnect_ui_version}"

@@ -4,5 +4,6 @@ export enum CentrifugeSubscriptionType {
 	Timeouts = "Timeouts",
 	NetworkStatus = "NetworkStatus",
 	FactoryResetKeys = "FactoryResetKeys",
-	FactoryResetStatus = "FactoryResetStatus"
+	FactoryResetStatus = "FactoryResetStatus",
+	UpdateStatus = "UpdateValidationStatus"
 }
