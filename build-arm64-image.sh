@@ -6,7 +6,7 @@ omnect_ui_version=$(toml get --raw Cargo.toml package.version)
 docker buildx build \
   --build-arg=DOCKER_NAMESPACE=omnectweucopsacr.azurecr.io \
   --build-arg=VERSION_RUST_CONTAINER=1.84.1-bookworm \
-  --platform   linux/arm64 \
+  --platform linux/arm64 \
   --load \
   -f Dockerfile . \
-  -t omnect-ui-arm64:"local_${omnect_ui_version}"
+  -t omnectshareddevacr.azurecr.io/omnect-ui:$(whoami)

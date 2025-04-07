@@ -13,7 +13,7 @@ use actix_session::{
 use actix_web::{
     body::MessageBody,
     cookie::{Key, SameSite},
-    web::{self},
+    web::{self, Data},
     App, HttpResponse, HttpServer, Responder,
 };
 use anyhow::Result;
@@ -24,6 +24,7 @@ use std::fs;
 use std::fs::File;
 use std::io::Write;
 use tokio::process::Command;
+use uuid::Uuid;
 
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
@@ -32,6 +33,14 @@ macro_rules! update_os_path {
     () => {{
         static DATA_DIR_PATH_DEFAULT: &'static str = "/var/lib/omnect-ui";
         std::env::var("DATA_DIR_PATH").unwrap_or(DATA_DIR_PATH_DEFAULT.to_string())
+    }};
+}
+
+macro_rules! centrifugo_http_server_port {
+    () => {{
+        static CENTRIFUGO_HTTP_SERVER_PORT_DEFAULT: &'static str = "8000";
+        std::env::var("CENTRIFUGO_HTTP_SERVER_PORT")
+            .unwrap_or(CENTRIFUGO_HTTP_SERVER_PORT_DEFAULT.to_string())
     }};
 }
 
@@ -56,6 +65,24 @@ struct CreateCertResponse {
     certificate: String,
     #[allow(dead_code)]
     expiration: String,
+}
+
+#[derive(Serialize)]
+struct HeaderKeyValue {
+    name: String,
+    value: String,
+}
+
+#[derive(Serialize)]
+struct PublishEndpoint {
+    url: String,
+    headers: Vec<HeaderKeyValue>,
+}
+
+#[derive(Serialize)]
+struct PublishIdEndpoint {
+    id: String,
+    endpoint: PublishEndpoint,
 }
 
 const CERT_PATH: &str = "/cert/cert.pem";
@@ -134,13 +161,45 @@ async fn main() {
             .build()
     }
 
+    let centrifugo_client_token_hmac_secret_key = Uuid::new_v4().to_string();
+    let centrifugo_http_api_key = Uuid::new_v4().to_string();
+
+    std::env::set_var(
+        "CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY",
+        &centrifugo_client_token_hmac_secret_key,
+    );
+    std::env::set_var("CENTRIFUGO_HTTP_API_KEY", &centrifugo_http_api_key);
+    std::env::set_var(
+        "CENTRIFUGO_HTTP_SERVER_PORT",
+        &centrifugo_http_server_port!(),
+    );
+
     let ods_socket_path = std::env::var("SOCKET_PATH").expect("env SOCKET_PATH is missing");
-    let centrifugo_client_token_hmac_secret_key =
-        std::env::var("CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY").expect("missing jwt secret");
     let username = std::env::var("LOGIN_USER").expect("login_token: missing user");
     let password = std::env::var("LOGIN_PASSWORD").expect("login_token: missing password");
     let index_html =
         std::fs::canonicalize("static/index.html").expect("static/index.html not found");
+
+    send_publish_endpoint(&centrifugo_http_api_key, &ods_socket_path).await;
+
+    fs::exists(&ods_socket_path).unwrap_or_else(|_| {
+        panic!(
+            "omnect device service socket file {} does not exist",
+            &ods_socket_path
+        )
+    });
+
+    fs::exists(&update_os_path!())
+        .unwrap_or_else(|_| panic!("path {} for os update does not exist", &update_os_path!()));
+
+    let api_config = Api {
+        ods_socket_path,
+        update_os_path: update_os_path!(),
+        centrifugo_client_token_hmac_secret_key,
+        username,
+        password,
+        index_html,
+    };
 
     let server = HttpServer::new(move || {
         App::new()
@@ -150,14 +209,7 @@ async fn main() {
                     .total_limit(UPLOAD_LIMIT_BYTES)
                     .memory_limit(MEMORY_LIMIT_BYTES),
             )
-            .app_data(Api::new(
-                &ods_socket_path,
-                &update_os_path!(),
-                &centrifugo_client_token_hmac_secret_key,
-                &username,
-                &password,
-                &index_html.to_path_buf(),
-            ))
+            .app_data(Data::new(api_config.clone()))
             .route("/", web::get().to(Api::index))
             .route(
                 "/factory-reset",
@@ -290,4 +342,40 @@ async fn create_module_certificate() -> impl Responder {
             HttpResponse::InternalServerError().finish()
         }
     }
+}
+
+async fn send_publish_endpoint(
+    centrifugo_http_api_key: &str,
+    ods_socket_path: &str,
+) -> impl Responder {
+    let headers = vec![
+        HeaderKeyValue {
+            name: String::from("Content-Type"),
+            value: String::from("application/json"),
+        },
+        HeaderKeyValue {
+            name: String::from("X-API-Key"),
+            value: String::from(centrifugo_http_api_key),
+        },
+    ];
+
+    let body = PublishIdEndpoint {
+        id: String::from(env!("CARGO_PKG_NAME")),
+        endpoint: PublishEndpoint {
+            url: format!(
+                "https://localhost:{}/api/publish",
+                &centrifugo_http_server_port!()
+            ),
+            headers,
+        },
+    };
+
+    if let Err(e) =
+        socket_client::post_with_json_body("/publish-endpoint/v1", body, ods_socket_path).await
+    {
+        error!("sending publish endpoint failed: {e:#}");
+        HttpResponse::InternalServerError().finish();
+    }
+
+    HttpResponse::Ok().finish()
 }

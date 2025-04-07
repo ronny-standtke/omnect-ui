@@ -5,3 +5,4 @@ centrifugo
 *.tar.gz
 *.env
 *.http
+/static
