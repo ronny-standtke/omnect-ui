@@ -10,35 +10,23 @@ import UserMenu from "./components/UserMenu.vue"
 import { useCentrifuge } from "./composables/useCentrifugo"
 import { useOverlaySpinner } from "./composables/useOverlaySpinner"
 import { useSnackbar } from "./composables/useSnackbar"
-import { CentrifugeSubscriptionType } from "./enums/centrifuge-subscription-type.enum"
-import type { UpdateValidationStatus } from "./types/update-validation-status"
+import { useWaitReconnect } from "./composables/useWaitReconnect"
 
 axios.defaults.validateStatus = (_) => true
 
 const { snackbarState } = useSnackbar()
-const { overlaySpinnerState, reset, updateDone } = useOverlaySpinner()
-const { initializeCentrifuge, onConnected, history, subscribe } = useCentrifuge()
+const { overlaySpinnerState, reset } = useOverlaySpinner()
+const { initializeCentrifuge } = useCentrifuge()
+const { onConnected } = useWaitReconnect()
 const { lgAndUp } = useDisplay()
 const router = useRouter()
 const route = useRoute()
 const showSideBar: Ref<boolean> = ref(lgAndUp.value)
 
 onConnected(() => {
-	if (!overlaySpinnerState.isUpdateRunning) {
-		reset()
-		return
-	}
-
-	history(checkUpdateState, CentrifugeSubscriptionType.UpdateStatus)
-	subscribe(checkUpdateState, CentrifugeSubscriptionType.UpdateStatus)
-	updateDone.trigger()
+	reset()
+	router.push("/login")
 })
-
-const checkUpdateState = (data: UpdateValidationStatus) => {
-	if (overlaySpinnerState.isUpdateRunning && (data.status === "Succeeded" || data.status === "Recovered")) {
-		reset()
-	}
-}
 
 const toggleSideBar = () => {
 	showSideBar.value = !showSideBar.value

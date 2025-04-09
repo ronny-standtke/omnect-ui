@@ -5,12 +5,14 @@ import DeviceInfo from "../components/DeviceInfo.vue"
 import DeviceNetworks from "../components/DeviceNetworks.vue"
 import { useCentrifuge } from "../composables/useCentrifugo"
 import { useOverlaySpinner } from "../composables/useOverlaySpinner"
+import { useWaitReconnect } from "../composables/useWaitReconnect"
 import { CentrifugeSubscriptionType } from "../enums/centrifuge-subscription-type.enum"
 import type { FactoryResetStatus, OnlineStatus, SystemInfo, Timeouts } from "../types"
 import type { UpdateValidationStatus } from "../types/update-validation-status"
 
 const { subscribe, history } = useCentrifuge()
 const { overlaySpinnerState } = useOverlaySpinner()
+const { startWaitReconnect } = useWaitReconnect()
 
 const online = ref(false)
 const systemInfo: Ref<SystemInfo | undefined> = ref(undefined)
@@ -36,12 +38,14 @@ const deviceInfo: Ref<Map<string, string | number>> = computed(
 const showIsRebooting = () => {
 	overlaySpinnerState.title = "Device is rebooting"
 	overlaySpinnerState.overlay = true
+	startWaitReconnect()
 }
 
 const showIsResetting = () => {
 	overlaySpinnerState.title = "The device is being reset"
 	overlaySpinnerState.text = "Please have some patience, the resetting may take some time."
 	overlaySpinnerState.overlay = true
+	startWaitReconnect()
 }
 
 const updateOnlineStatus = (data: OnlineStatus) => {

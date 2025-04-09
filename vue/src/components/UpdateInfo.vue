@@ -3,12 +3,14 @@ import { useFetch } from "@vueuse/core"
 import { ref, toRef } from "vue"
 import { useOverlaySpinner } from "../composables/useOverlaySpinner"
 import { useSnackbar } from "../composables/useSnackbar"
+import { useWaitReconnect } from "../composables/useWaitReconnect"
 import router from "../plugins/router"
 import type { UpdateManifest } from "../types/update-manifest"
 import KeyValuePair from "./ui-components/KeyValuePair.vue"
 
 const { showError: snackbarShowError } = useSnackbar()
 const { overlaySpinnerState, reset: resetOverlay } = useOverlaySpinner()
+const { startWaitReconnect, stopWaitReconnect } = useWaitReconnect()
 
 const props = defineProps<{
 	updateManifest: UpdateManifest | undefined
@@ -43,11 +45,13 @@ const triggerUpdate = () => {
 	overlaySpinnerState.text = "Please have some patience, the update may take some time."
 	overlaySpinnerState.overlay = true
 	overlaySpinnerState.isUpdateRunning = true
+	startWaitReconnect()
 }
 
 const showError = (errorMsg: string) => {
 	resetOverlay()
 	snackbarShowError(errorMsg)
+	stopWaitReconnect()
 }
 
 const toggleEnforceConnect = (v: boolean | null) => {
