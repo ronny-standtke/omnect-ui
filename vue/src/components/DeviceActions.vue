@@ -8,7 +8,7 @@ import { useSnackbar } from "../composables/useSnackbar"
 import { CentrifugeSubscriptionType } from "../enums/centrifuge-subscription-type.enum"
 import type { FactoryResetKeys } from "../types"
 
-const { subscribe, history } = useCentrifuge()
+const { subscribe, history, onConnected } = useCentrifuge()
 const { showError } = useSnackbar()
 const router = useRouter()
 const selectedFactoryResetKeys: Ref<string[]> = ref([])
@@ -77,9 +77,17 @@ const updateFactoryResetKeys = (data: FactoryResetKeys) => {
 	factoryResetKeys.value = data
 }
 
-onMounted(() => {
-	subscribe(updateFactoryResetKeys, CentrifugeSubscriptionType.FactoryResetKeys)
+const loadHistoryAndSubscribe = () => {
 	history(updateFactoryResetKeys, CentrifugeSubscriptionType.FactoryResetKeys)
+	subscribe(updateFactoryResetKeys, CentrifugeSubscriptionType.FactoryResetKeys)
+}
+
+onConnected(() => {
+	loadHistoryAndSubscribe()
+})
+
+onMounted(() => {
+	loadHistoryAndSubscribe()
 })
 </script>
 

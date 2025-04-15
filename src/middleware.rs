@@ -15,7 +15,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::api::Api;
+use crate::{api::Api, validate_password};
 
 pub const TOKEN_EXPIRE_HOURS: u64 = 2;
 
@@ -85,7 +85,7 @@ where
                     return Ok(unauthorized_error(req).map_into_right_body());
                 };
 
-                match verify_user(auth, &api_config.username, &api_config.password) {
+                match verify_user(auth).await {
                     Ok(true) => {
                         let res = service.call(req).await?;
                         Ok(res.map_into_left_body())
@@ -116,8 +116,18 @@ pub fn verify_token(token: &str, centrifugo_client_token_hmac_secret_key: &str) 
         .is_ok())
 }
 
-fn verify_user(auth: BasicAuth, username: &str, password: &str) -> Result<bool> {
-    Ok(auth.user_id() == username && auth.password() == Some(password))
+async fn verify_user(auth: BasicAuth) -> Result<bool> {
+    if auth.password().is_none() {
+        return Ok(false);
+    }
+    let password = auth.password().unwrap();
+
+    if let Err(e) = validate_password(password).await {
+        error!("verify_user() failed: {e:#}");
+        return Ok(false);
+    }
+
+    Ok(true)
 }
 
 fn unauthorized_error(req: ServiceRequest) -> ServiceResponse {

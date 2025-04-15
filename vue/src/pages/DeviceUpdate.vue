@@ -10,7 +10,7 @@ import router from "../plugins/router"
 import type { SystemInfo } from "../types"
 
 const { showError } = useSnackbar()
-const { history } = useCentrifuge()
+const { history, onConnected } = useCentrifuge()
 
 const currentVersion = ref<string>()
 const loadUpdatePayload = ref({
@@ -42,10 +42,20 @@ const loadUpdateData = (filename: string) => {
 	loadUpdate(false)
 }
 
+const setCurrentVersion = (data: SystemInfo) => {
+	currentVersion.value = data.os.version
+}
+
+const loadHistory = () => {
+	history(setCurrentVersion, CentrifugeSubscriptionType.SystemInfo)
+}
+
+onConnected(() => {
+	loadHistory()
+})
+
 onMounted(() => {
-	history((data: SystemInfo) => {
-		currentVersion.value = data.os.version
-	}, CentrifugeSubscriptionType.SystemInfo)
+	loadHistory()
 })
 </script>
 

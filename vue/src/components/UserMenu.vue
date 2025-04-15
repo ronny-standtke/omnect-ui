@@ -4,7 +4,7 @@ import { useRouter } from "vue-router"
 import { useCentrifuge } from "../composables/useCentrifugo"
 import Menu from "./Menu.vue"
 
-const { unsubscribeAll } = useCentrifuge()
+const { unsubscribeAll, disconnect } = useCentrifuge()
 const router = useRouter()
 
 const menu = ref(false)
@@ -14,6 +14,7 @@ const logOut = async () => {
 		method: "POST"
 	})
 	unsubscribeAll()
+	disconnect()
 	router.push("/login")
 }
 </script>
@@ -30,9 +31,12 @@ const logOut = async () => {
 			</picture>
 		</template>
 
-		<v-card title="omnect-ui" subtitle="User">
+		<v-card title="omnect-ui">
 			<v-card-text class="mt-2">
 				<div class="flex justify-space-between items-center">
+					<v-btn type="button" text="Change password" prepend-icon="mdi-lock-outline" variant="text"
+						color="default" @click="$router.push('/update-password')">
+					</v-btn>
 					<v-btn type="button" text="logout" prepend-icon="mdi-logout" variant="text" color="default"
 						@click="logOut">
 					</v-btn>

@@ -16,6 +16,13 @@ export const useSnackbar = createGlobalState(() => {
 		snackbarState.snackbar = false
 	}
 
+	const showSuccess = (msg: string) => {
+		snackbarState.color = "success"
+		snackbarState.timeout = 2000
+		snackbarState.msg = msg
+		snackbarState.snackbar = true
+	}
+
 	const showError = (msg: string) => {
 		snackbarState.color = "error"
 		snackbarState.timeout = -1
@@ -23,5 +30,5 @@ export const useSnackbar = createGlobalState(() => {
 		snackbarState.snackbar = true
 	}
 
-	return { snackbarState, reset, showError }
+	return { snackbarState, reset, showSuccess, showError }
 })

@@ -1,15 +1,20 @@
-use crate::middleware::TOKEN_EXPIRE_HOURS;
 use crate::socket_client::*;
+use crate::{middleware::TOKEN_EXPIRE_HOURS, validate_password};
 use actix_files::NamedFile;
 use actix_multipart::form::{tempfile::TempFile, MultipartForm};
 use actix_session::Session;
 use actix_web::{web, HttpResponse, Responder};
 use anyhow::{Context, Result};
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+    Argon2,
+};
 use jwt_simple::prelude::*;
 use log::{debug, error};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
-    fs,
+    fs::{self, File},
+    io::Write,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
@@ -17,6 +22,12 @@ use std::{
 macro_rules! data_path {
     ($filename:expr) => {{
         Path::new("/data/").join($filename)
+    }};
+}
+
+macro_rules! config_path {
+    ($filename:expr) => {{
+        Path::new("/data/").join("config/").join($filename)
     }};
 }
 
@@ -29,6 +40,21 @@ macro_rules! tmp_path {
 #[derive(Deserialize)]
 pub struct FactoryResetInput {
     preserve: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPasswordPayload {
+    password: String,
+    repeat_password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePasswordPayload {
+    current_password: String,
+    password: String,
+    repeat_password: String,
 }
 
 #[derive(Serialize)]
@@ -66,8 +92,6 @@ pub struct Api {
     pub ods_socket_path: String,
     pub update_os_path: String,
     pub centrifugo_client_token_hmac_secret_key: String,
-    pub username: String,
-    pub password: String,
     pub index_html: PathBuf,
 }
 
@@ -225,11 +249,115 @@ impl Api {
         }
     }
 
+    pub async fn set_password(body: web::Json<SetPasswordPayload>) -> impl Responder {
+        debug!("set_password() called");
+
+        if body.password != body.repeat_password {
+            return HttpResponse::BadRequest().body("passwords do not match");
+        }
+
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+        let password_hash = argon2.hash_password(body.password.as_bytes(), &salt);
+        if password_hash.is_err() {
+            error!("set_password() failed: {:#}", password_hash.err().unwrap());
+            return HttpResponse::InternalServerError().finish();
+        }
+        let hash = password_hash.unwrap().to_string();
+        let password_file = config_path!("password");
+        if password_file.exists() {
+            return HttpResponse::Found()
+                .append_header(("Location", "/login"))
+                .finish();
+        }
+
+        if let Err(e) = fs::create_dir_all(password_file.parent().unwrap()) {
+            error!("set_password() failed: {:#}", e);
+            return HttpResponse::InternalServerError().body(format!("{:#}", e));
+        }
+
+        match File::create(password_file) {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(hash.as_bytes()) {
+                    error!("set_password() failed: {:#}", e);
+                    return HttpResponse::InternalServerError().body(format!("{:#}", e));
+                }
+            }
+            Err(e) => {
+                error!("set_password() failed: {:#}", e);
+                return HttpResponse::InternalServerError().body(format!("{:#}", e));
+            }
+        }
+
+        HttpResponse::Ok().finish()
+    }
+
+    pub async fn update_password(
+        body: web::Json<UpdatePasswordPayload>,
+        session: Session,
+    ) -> impl Responder {
+        debug!("update_password() called");
+
+        if body.password != body.repeat_password {
+            return HttpResponse::BadRequest().body("passwords do not match");
+        }
+
+        if let Err(e) = validate_password(&body.current_password).await {
+            error!("update_password() failed: {e:#}");
+            return HttpResponse::BadRequest().body("current password is not correct");
+        }
+
+        let password_file = config_path!("password");
+
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+        let password_hash = argon2.hash_password(body.password.as_bytes(), &salt);
+        if password_hash.is_err() {
+            error!(
+                "update_password() failed: {:#}",
+                password_hash.err().unwrap()
+            );
+            return HttpResponse::InternalServerError().finish();
+        }
+        let hash = password_hash.unwrap().to_string();
+
+        match File::create(&password_file) {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(hash.as_bytes()) {
+                    error!("update_password() failed: {:#}", e);
+                    return HttpResponse::InternalServerError().body(format!("{:#}", e));
+                }
+            }
+            Err(e) => {
+                error!("update_password() failed: {:#}", e);
+                return HttpResponse::InternalServerError().body(format!("{:#}", e));
+            }
+        }
+
+        session.purge();
+        HttpResponse::Ok().finish()
+    }
+
+    pub async fn require_set_password() -> impl Responder {
+        debug!("require_set_password() called");
+
+        let password_file = config_path!("password");
+        if !password_file.exists() {
+            return HttpResponse::Created()
+                .append_header(("Location", "/set-password"))
+                .finish();
+        }
+
+        HttpResponse::Ok().finish()
+    }
+
     async fn clear_data_folder() -> Result<()> {
         debug!("clear_data_folder() called");
         for entry in fs::read_dir("/data")? {
             let entry = entry?;
-            fs::remove_file(entry.path())?;
+            if entry.path().is_file() {
+                fs::remove_file(entry.path())?;
+            }
         }
 
         Ok(())

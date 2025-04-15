@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios"
-import { type Ref, onBeforeMount, ref } from "vue"
+import { type Ref, computed, onBeforeMount, ref } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useDisplay } from "vuetify"
 import BaseSideBar from "./components/BaseSideBar.vue"
@@ -38,15 +38,24 @@ const updateSidebarVisibility = (visible: boolean) => {
 
 onBeforeMount(async () => {
 	try {
-		const res = await fetch("token/refresh")
-		if (!res.ok) {
-			router.push("/login")
+		const requireSetPassword = await fetch("require-set-password")
+		if (requireSetPassword.status === 201) {
+			await router.push(requireSetPassword.headers.get("Location") ?? "/set-password")
 		} else {
-			initializeCentrifuge()
+			const res = await fetch("token/refresh")
+			if (!res.ok) {
+				router.push("/login")
+			} else {
+				initializeCentrifuge()
+			}
 		}
 	} catch {
 		router.push("/login")
 	}
+})
+
+const showBars = computed(() => {
+	return route.path !== "/login" && route.path !== "/set-password"
 })
 </script>
 
@@ -57,14 +66,14 @@ onBeforeMount(async () => {
         <v-icon class="hidden-lg-and-up mr-4 cursor-pointer text-primary" @click.stop="toggleSideBar">mdi-menu</v-icon>
         <OmnectLogo class="h-12"></OmnectLogo>
       </template>
-      <template v-if="route.path !== '/login'" #append>
+      <template v-if="showBars" #append>
         <div class="flex gap-x-4 mr-4 items-center">
           <UserMenu />
         </div>
       </template>
     </v-app-bar>
-    <BaseSideBar v-if="route.path !== '/login'" :showSideBar="showSideBar"
-      @drawerVisibiltyChanged="updateSidebarVisibility"></BaseSideBar>
+    <BaseSideBar v-if="showBars" :showSideBar="showSideBar" @drawerVisibiltyChanged="updateSidebarVisibility">
+    </BaseSideBar>
     <v-main>
       <RouterView></RouterView>
       <v-snackbar v-model="snackbarState.snackbar" :color="snackbarState.color" :timeout="snackbarState.timeout">

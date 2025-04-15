@@ -10,7 +10,7 @@ import { CentrifugeSubscriptionType } from "../enums/centrifuge-subscription-typ
 import type { FactoryResetStatus, OnlineStatus, SystemInfo, Timeouts } from "../types"
 import type { UpdateValidationStatus } from "../types/update-validation-status"
 
-const { subscribe, history } = useCentrifuge()
+const { subscribe, history, onConnected } = useCentrifuge()
 const { overlaySpinnerState } = useOverlaySpinner()
 const { startWaitReconnect } = useWaitReconnect()
 
@@ -68,7 +68,7 @@ const updateUpdateStatus = (data: UpdateValidationStatus) => {
 	updateStatus.value = data.status
 }
 
-onMounted(() => {
+const loadHistoryAndSubscribe = () => {
 	history(updateOnlineStatus, CentrifugeSubscriptionType.OnlineStatus)
 	history(updateSystemInfo, CentrifugeSubscriptionType.SystemInfo)
 	history(updateTimeouts, CentrifugeSubscriptionType.Timeouts)
@@ -80,6 +80,14 @@ onMounted(() => {
 	subscribe(updateTimeouts, CentrifugeSubscriptionType.Timeouts)
 	subscribe(updateFactoryResetStatus, CentrifugeSubscriptionType.FactoryResetStatus)
 	subscribe(updateUpdateStatus, CentrifugeSubscriptionType.UpdateStatus)
+}
+
+onConnected(() => {
+	loadHistoryAndSubscribe()
+})
+
+onMounted(() => {
+	loadHistoryAndSubscribe()
 })
 </script>
 

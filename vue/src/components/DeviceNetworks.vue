@@ -11,7 +11,7 @@ import KeyValuePair from "./ui-components/KeyValuePair.vue"
 const networkStatus: Ref<NetworkStatus | undefined> = ref(undefined)
 const { snackbarState, showError } = useSnackbar()
 const router = useRouter()
-const { history, subscribe } = useCentrifuge()
+const { history, subscribe, onConnected } = useCentrifuge()
 
 const showSuccess = (successMsg: string) => {
 	snackbarState.msg = successMsg
@@ -45,10 +45,17 @@ const updateNetworkStatus = (data: NetworkStatus) => {
 	networkStatus.value = data
 }
 
-onMounted(() => {
+const loadHistoryAndSubscribe = () => {
 	history(updateNetworkStatus, CentrifugeSubscriptionType.NetworkStatus)
-
 	subscribe(updateNetworkStatus, CentrifugeSubscriptionType.NetworkStatus)
+}
+
+onConnected(() => {
+	loadHistoryAndSubscribe()
+})
+
+onMounted(() => {
+	loadHistoryAndSubscribe()
 })
 </script>
 

@@ -16,18 +16,25 @@ use actix_web::{
     web::{self, Data},
     App, HttpResponse, HttpServer, Responder,
 };
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use env_logger::{Builder, Env, Target};
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::fs::File;
 use std::io::Write;
+use std::{fs, path::Path};
 use tokio::process::Command;
 use uuid::Uuid;
 
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
+
+macro_rules! config_path {
+    ($filename:expr) => {{
+        Path::new("/data/").join("config/").join($filename)
+    }};
+}
 
 macro_rules! update_os_path {
     () => {{
@@ -175,8 +182,6 @@ async fn main() {
     );
 
     let ods_socket_path = std::env::var("SOCKET_PATH").expect("env SOCKET_PATH is missing");
-    let username = std::env::var("LOGIN_USER").expect("login_token: missing user");
-    let password = std::env::var("LOGIN_PASSWORD").expect("login_token: missing password");
     let index_html =
         std::fs::canonicalize("static/index.html").expect("static/index.html not found");
 
@@ -196,8 +201,6 @@ async fn main() {
         ods_socket_path,
         update_os_path: update_os_path!(),
         centrifugo_client_token_hmac_secret_key,
-        username,
-        password,
         index_html,
     };
 
@@ -243,6 +246,12 @@ async fn main() {
                 "/token/refresh",
                 web::get().to(Api::token).wrap(middleware::AuthMw),
             )
+            .route(
+                "/require-set-password",
+                web::get().to(Api::require_set_password),
+            )
+            .route("/set-password", web::post().to(Api::set_password))
+            .route("/update-password", web::post().to(Api::update_password))
             .route("/version", web::get().to(Api::version))
             .route("/logout", web::post().to(Api::logout))
             .service(Files::new(
@@ -378,4 +387,32 @@ async fn send_publish_endpoint(
     }
 
     HttpResponse::Ok().finish()
+}
+
+pub async fn validate_password(password: &str) -> Result<()> {
+    if password.is_empty() {
+        bail!("password is empty");
+    }
+
+    let password_file = config_path!("password");
+    if !password_file.exists() {
+        bail!("password file not found");
+    }
+    let password_hash =
+        fs::read_to_string(password_file).context("failed to read password file")?;
+
+    if password_hash.is_empty() {
+        bail!("password hash is empty");
+    }
+    let parsed_hash = PasswordHash::new(&password_hash);
+    if parsed_hash.is_err() {
+        bail!("failed to parse password hash");
+    }
+
+    let verified = Argon2::default().verify_password(password.as_bytes(), &parsed_hash.unwrap());
+    if verified.is_err() {
+        bail!("password verification failed");
+    }
+
+    Ok(())
 }
