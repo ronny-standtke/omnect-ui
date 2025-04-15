@@ -1,0 +1,20 @@
+{
+    "http_server": {
+        "tls": {
+            "enabled": true
+        }
+    },
+    "client": {
+        "allowed_origins": [
+            "*"
+        ]
+    },
+    "channel": {
+        "without_namespace": {
+            "history_size": 1,
+            "history_ttl": "720h",
+            "allow_history_for_client": true,
+            "allow_subscribe_for_client": true
+        }
+    }
+}

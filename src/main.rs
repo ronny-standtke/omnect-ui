@@ -273,6 +273,8 @@ async fn main() {
 
     let mut centrifugo =
         Command::new(std::fs::canonicalize("centrifugo").expect("centrifugo not found"))
+            .arg("-c")
+            .arg("/centrifugo_config.json")
             .spawn()
             .expect("Failed to spawn child process");
 

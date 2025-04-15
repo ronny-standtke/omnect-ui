@@ -1,6 +1,5 @@
 ARG DOCKER_NAMESPACE
 ARG VERSION_RUST_CONTAINER
-
 ARG DISTROLESS_IMAGE=gcr.io/distroless/base-debian12:nonroot
 
 FROM oven/bun AS vue-install
@@ -107,5 +106,6 @@ COPY --from=builder /copy/status.d /var/lib/dpkg/status.d
 COPY --from=vue-build /usr/src/app/dist /static/
 
 WORKDIR "/"
+COPY config/centrifugo_config.json /
 
 ENTRYPOINT [ "/omnect-ui" ]
