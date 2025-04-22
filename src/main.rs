@@ -16,7 +16,7 @@ use actix_web::{
     web::{self, Data},
     App, HttpResponse, HttpServer, Responder,
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use env_logger::{Builder, Env, Target};
 use log::{debug, error, info};
@@ -391,28 +391,31 @@ async fn send_publish_endpoint(
     HttpResponse::Ok().finish()
 }
 
-pub async fn validate_password(password: &str) -> Result<()> {
+pub fn validate_password(password: &str) -> Result<()> {
     if password.is_empty() {
+        error!("password is empty");
         bail!("password is empty");
     }
 
     let password_file = config_path!("password");
-    if !password_file.exists() {
-        bail!("password file not found");
-    }
-    let password_hash =
-        fs::read_to_string(password_file).context("failed to read password file")?;
+
+    let Ok(password_hash) = fs::read_to_string(password_file) else {
+        error!("failed to read password file");
+        bail!("failed to read password file");
+    };
 
     if password_hash.is_empty() {
+        error!("password hash is empty");
         bail!("password hash is empty");
     }
-    let parsed_hash = PasswordHash::new(&password_hash);
-    if parsed_hash.is_err() {
-        bail!("failed to parse password hash");
-    }
 
-    let verified = Argon2::default().verify_password(password.as_bytes(), &parsed_hash.unwrap());
-    if verified.is_err() {
+    let Ok(parsed_hash) = PasswordHash::new(&password_hash) else {
+        error!("failed to parse password hash");
+        bail!("failed to parse password hash");
+    };
+
+    if let Err(e) = Argon2::default().verify_password(password.as_bytes(), &parsed_hash) {
+        error!("password verification failed: {e:#}");
         bail!("password verification failed");
     }
 

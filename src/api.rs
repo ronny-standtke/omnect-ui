@@ -4,7 +4,7 @@ use actix_files::NamedFile;
 use actix_multipart::form::{tempfile::TempFile, MultipartForm};
 use actix_session::Session;
 use actix_web::{web, HttpResponse, Responder};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
     Argon2,
@@ -46,7 +46,6 @@ pub struct FactoryResetInput {
 #[serde(rename_all = "camelCase")]
 pub struct SetPasswordPayload {
     password: String,
-    repeat_password: String,
 }
 
 #[derive(Deserialize)]
@@ -54,7 +53,6 @@ pub struct SetPasswordPayload {
 pub struct UpdatePasswordPayload {
     current_password: String,
     password: String,
-    repeat_password: String,
 }
 
 #[derive(Serialize)]
@@ -252,41 +250,15 @@ impl Api {
     pub async fn set_password(body: web::Json<SetPasswordPayload>) -> impl Responder {
         debug!("set_password() called");
 
-        if body.password != body.repeat_password {
-            return HttpResponse::BadRequest().body("passwords do not match");
-        }
-
-        let salt = SaltString::generate(&mut OsRng);
-        let argon2 = Argon2::default();
-        let password_hash = argon2.hash_password(body.password.as_bytes(), &salt);
-        if password_hash.is_err() {
-            error!("set_password() failed: {:#}", password_hash.err().unwrap());
-            return HttpResponse::InternalServerError().finish();
-        }
-        let hash = password_hash.unwrap().to_string();
-        let password_file = config_path!("password");
-        if password_file.exists() {
+        if !Api::set_password_necessary() {
             return HttpResponse::Found()
                 .append_header(("Location", "/login"))
                 .finish();
         }
 
-        if let Err(e) = fs::create_dir_all(password_file.parent().unwrap()) {
-            error!("set_password() failed: {:#}", e);
+        if let Err(e) = Api::store_or_update_password(&body.password).await {
+            error!("set_password() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{:#}", e));
-        }
-
-        match File::create(password_file) {
-            Ok(mut file) => {
-                if let Err(e) = file.write_all(hash.as_bytes()) {
-                    error!("set_password() failed: {:#}", e);
-                    return HttpResponse::InternalServerError().body(format!("{:#}", e));
-                }
-            }
-            Err(e) => {
-                error!("set_password() failed: {:#}", e);
-                return HttpResponse::InternalServerError().body(format!("{:#}", e));
-            }
         }
 
         HttpResponse::Ok().finish()
@@ -298,40 +270,14 @@ impl Api {
     ) -> impl Responder {
         debug!("update_password() called");
 
-        if body.password != body.repeat_password {
-            return HttpResponse::BadRequest().body("passwords do not match");
-        }
-
-        if let Err(e) = validate_password(&body.current_password).await {
+        if let Err(e) = validate_password(&body.current_password) {
             error!("update_password() failed: {e:#}");
             return HttpResponse::BadRequest().body("current password is not correct");
         }
 
-        let password_file = config_path!("password");
-
-        let salt = SaltString::generate(&mut OsRng);
-        let argon2 = Argon2::default();
-        let password_hash = argon2.hash_password(body.password.as_bytes(), &salt);
-        if password_hash.is_err() {
-            error!(
-                "update_password() failed: {:#}",
-                password_hash.err().unwrap()
-            );
-            return HttpResponse::InternalServerError().finish();
-        }
-        let hash = password_hash.unwrap().to_string();
-
-        match File::create(&password_file) {
-            Ok(mut file) => {
-                if let Err(e) = file.write_all(hash.as_bytes()) {
-                    error!("update_password() failed: {:#}", e);
-                    return HttpResponse::InternalServerError().body(format!("{:#}", e));
-                }
-            }
-            Err(e) => {
-                error!("update_password() failed: {:#}", e);
-                return HttpResponse::InternalServerError().body(format!("{:#}", e));
-            }
+        if let Err(e) = Api::store_or_update_password(&body.password).await {
+            error!("update_password() failed: {e:#}");
+            return HttpResponse::InternalServerError().body(format!("{:#}", e));
         }
 
         session.purge();
@@ -341,8 +287,7 @@ impl Api {
     pub async fn require_set_password() -> impl Responder {
         debug!("require_set_password() called");
 
-        let password_file = config_path!("password");
-        if !password_file.exists() {
+        if Api::set_password_necessary() {
             return HttpResponse::Created()
                 .append_header(("Location", "/set-password"))
                 .finish();
@@ -387,6 +332,62 @@ impl Api {
         let mut perm = metadata.permissions();
         perm.set_mode(0o750);
         fs::set_permissions(file_path, perm).context("failed to set file permission")?;
+
+        Ok(())
+    }
+
+    fn set_password_necessary() -> bool {
+        debug!("set_password_necessary() called");
+        let password_file = config_path!("password");
+        !password_file.exists()
+    }
+
+    async fn hash_password(password: &str) -> Result<String> {
+        debug!("hash_password() called");
+
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+
+        match argon2.hash_password(password.as_bytes(), &salt) {
+            Ok(hash) => Ok(hash.to_string()),
+            Err(e) => {
+                error!("hash_password() failed: {:#}", e);
+                bail!("failed to hash password");
+            }
+        }
+    }
+
+    async fn store_or_update_password(password: &str) -> Result<()> {
+        debug!("store_or_update_password() called");
+
+        let password_file = config_path!("password");
+
+        if Api::set_password_necessary() {
+            if let Some(parent) = password_file.parent() {
+                if let Err(e) = fs::create_dir_all(parent) {
+                    error!("failed to create password directory: {:#}", e);
+                    bail!("failed to create password directory: {:#}", e);
+                }
+            } else {
+                error!("failed to get parent directory for password file");
+                bail!("failed to get parent directory for password file");
+            }
+        }
+
+        let Ok(hash) = Api::hash_password(password).await else {
+            error!("failed to hash password");
+            bail!("failed to hash password");
+        };
+
+        let Ok(mut file) = File::create(&password_file) else {
+            error!("failed to create password file");
+            bail!("failed to create password file");
+        };
+
+        if let Err(e) = file.write_all(hash.as_bytes()) {
+            error!("failed to write password file: {:#}", e);
+            bail!("failed to write password file: {:#}", e);
+        }
 
         Ok(())
     }

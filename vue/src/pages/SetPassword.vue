@@ -23,8 +23,7 @@ const handleSubmit = async (): Promise<void> => {
 					"Content-Type": "application/json"
 				},
 				body: JSON.stringify({
-					password: password.value,
-					repeatPassword: repeatPassword.value
+					password: password.value
 				})
 			})
 

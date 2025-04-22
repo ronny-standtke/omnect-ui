@@ -62,7 +62,11 @@ where
         let service = Rc::clone(&self.service);
 
         Box::pin(async move {
-            let api_config = req.app_data::<Data<Api>>().cloned().unwrap();
+            let Some(api_config) = req.app_data::<Data<Api>>().cloned() else {
+                let http_res = HttpResponse::InternalServerError().finish();
+                let (http_req, _) = req.into_parts();
+                return Ok(ServiceResponse::new(http_req, http_res).map_into_right_body());
+            };
 
             let token = match req.get_session().get::<String>("token") {
                 Ok(token) => token.unwrap_or_default(),
@@ -85,16 +89,11 @@ where
                     return Ok(unauthorized_error(req).map_into_right_body());
                 };
 
-                match verify_user(auth).await {
-                    Ok(true) => {
-                        let res = service.call(req).await?;
-                        Ok(res.map_into_left_body())
-                    }
-                    Ok(false) => Ok(unauthorized_error(req).map_into_right_body()),
-                    Err(e) => {
-                        error!("user not authorized {}", e);
-                        Ok(unauthorized_error(req).map_into_right_body())
-                    }
+                if verify_user(auth).await {
+                    let res = service.call(req).await?;
+                    Ok(res.map_into_left_body())
+                } else {
+                    Ok(unauthorized_error(req).map_into_right_body())
                 }
             }
         })
@@ -116,18 +115,17 @@ pub fn verify_token(token: &str, centrifugo_client_token_hmac_secret_key: &str) 
         .is_ok())
 }
 
-async fn verify_user(auth: BasicAuth) -> Result<bool> {
-    if auth.password().is_none() {
-        return Ok(false);
-    }
-    let password = auth.password().unwrap();
+async fn verify_user(auth: BasicAuth) -> bool {
+    let Some(password) = auth.password() else {
+        return false;
+    };
 
-    if let Err(e) = validate_password(password).await {
+    if let Err(e) = validate_password(password) {
         error!("verify_user() failed: {e:#}");
-        return Ok(false);
+        return false;
     }
 
-    Ok(true)
+    true
 }
 
 fn unauthorized_error(req: ServiceRequest) -> ServiceResponse {
