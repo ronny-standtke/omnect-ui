@@ -25,6 +25,7 @@ use std::fs::File;
 use std::io::Write;
 use std::{fs, path::Path};
 use tokio::process::Command;
+use tokio::signal::unix::{signal, SignalKind};
 use uuid::Uuid;
 
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
@@ -185,8 +186,6 @@ async fn main() {
     let index_html =
         std::fs::canonicalize("static/index.html").expect("static/index.html not found");
 
-    send_publish_endpoint(&centrifugo_http_api_key, &ods_socket_path).await;
-
     fs::exists(&ods_socket_path).unwrap_or_else(|_| {
         panic!(
             "omnect device service socket file {} does not exist",
@@ -197,8 +196,10 @@ async fn main() {
     fs::exists(&update_os_path!())
         .unwrap_or_else(|_| panic!("path {} for os update does not exist", &update_os_path!()));
 
+    send_publish_endpoint(&centrifugo_http_api_key, &ods_socket_path).await;
+
     let api_config = Api {
-        ods_socket_path,
+        ods_socket_path: ods_socket_path.clone(),
         update_os_path: update_os_path!(),
         centrifugo_client_token_hmac_secret_key,
         index_html,
@@ -280,9 +281,17 @@ async fn main() {
 
     debug!("centrifugo pid: {}", centrifugo.id().unwrap());
 
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             debug!("ctrl-c");
+            delete_publish_endpoint(&ods_socket_path).await;
+            server_handle.stop(true).await;
+        },
+        _ = sigterm.recv() => {
+            debug!("SIGTERM received");
+            delete_publish_endpoint(&ods_socket_path).await;
             server_handle.stop(true).await;
         },
         _ = server_task => {
@@ -385,6 +394,19 @@ async fn send_publish_endpoint(
         socket_client::post_with_json_body("/publish-endpoint/v1", body, ods_socket_path).await
     {
         error!("sending publish endpoint failed: {e:#}");
+        HttpResponse::InternalServerError().finish();
+    }
+
+    HttpResponse::Ok().finish()
+}
+
+async fn delete_publish_endpoint(ods_socket_path: &str) -> impl Responder {
+    let path = format!(
+        "/publish-endpoint/v1/{}",
+        String::from(env!("CARGO_PKG_NAME"))
+    );
+    if let Err(e) = socket_client::delete_with_empty_body(&path, ods_socket_path).await {
+        error!("deleting publish endpoint failed: {e:#}");
         HttpResponse::InternalServerError().finish();
     }
 

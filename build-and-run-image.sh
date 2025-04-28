@@ -20,6 +20,7 @@ docker build \
 docker run --rm \
   -v $(pwd)/temp:/cert \
   -v /tmp:/socket \
+  -v $(pwd)/temp/data:/data \
   -u $(id -u):$(id -g) \
   -e RUST_LOG=debug \
   -e UI_PORT=1977 \
@@ -27,7 +28,7 @@ docker run --rm \
   -e CENTRIFUGO_ADMIN_ENABLED=true \
   -e CENTRIFUGO_ADMIN_PASSWORD=123 \
   -e CENTRIFUGO_ADMIN_SECRET=123 \
-  -e DATA_DIR_PATH=$(pwd)/temp/data \
+  -e DATA_DIR_PATH=/data \
   -p "${omnect_ui_port}":"${omnect_ui_port}" \
   -p "${centrifugo_port}":"${centrifugo_port}" \
   omnect-ui-x86:"local_${omnect_ui_version}"
