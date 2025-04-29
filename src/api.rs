@@ -97,7 +97,9 @@ impl Api {
     pub async fn index(config: web::Data<Api>) -> actix_web::Result<NamedFile> {
         debug!("index() called");
 
-        if let Err(e) = post_with_empty_body("/republish/v1", &config.ods_socket_path).await {
+        static ENDPOINT: &str = concat!("/republish/v1/", env!("CARGO_PKG_NAME"));
+
+        if let Err(e) = post_with_empty_body(ENDPOINT, &config.ods_socket_path).await {
             error!("republish failed: {e:#}");
             return Err(actix_web::error::ErrorInternalServerError(
                 "republish failed",

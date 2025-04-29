@@ -89,7 +89,7 @@ struct PublishEndpoint {
 
 #[derive(Serialize)]
 struct PublishIdEndpoint {
-    id: String,
+    id: &'static str,
     endpoint: PublishEndpoint,
 }
 
@@ -380,7 +380,7 @@ async fn send_publish_endpoint(
     ];
 
     let body = PublishIdEndpoint {
-        id: String::from(env!("CARGO_PKG_NAME")),
+        id: env!("CARGO_PKG_NAME"),
         endpoint: PublishEndpoint {
             url: format!(
                 "https://localhost:{}/api/publish",
@@ -401,11 +401,9 @@ async fn send_publish_endpoint(
 }
 
 async fn delete_publish_endpoint(ods_socket_path: &str) -> impl Responder {
-    let path = format!(
-        "/publish-endpoint/v1/{}",
-        String::from(env!("CARGO_PKG_NAME"))
-    );
-    if let Err(e) = socket_client::delete_with_empty_body(&path, ods_socket_path).await {
+    static ENDPOINT: &str = concat!("/publish-endpoint/v1/", env!("CARGO_PKG_NAME"));
+
+    if let Err(e) = socket_client::delete_with_empty_body(ENDPOINT, ods_socket_path).await {
         error!("deleting publish endpoint failed: {e:#}");
         HttpResponse::InternalServerError().finish();
     }

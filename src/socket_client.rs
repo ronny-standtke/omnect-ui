@@ -12,19 +12,11 @@ pub async fn post_with_json_body(
     body: impl Serialize,
     socket_path: &str,
 ) -> Result<HttpResponse> {
-    let json = match serde_json::to_value(body) {
-        Ok(r) => r,
-        Err(e) => {
-            error!("failed to serialize data error: {e:#}");
-            return Ok(HttpResponse::InternalServerError().body(format!("{e}")));
-        }
-    };
-
     let request = Request::builder()
         .uri(path)
         .method("POST")
         .header("Host", "localhost")
-        .body(serde_json::to_string(&json).unwrap_or_default())
+        .body(serde_json::to_string(&body).unwrap_or_default())
         .context("build request failed")?;
 
     send_request(request, socket_path).await
