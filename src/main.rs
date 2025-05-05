@@ -1,6 +1,9 @@
 mod api;
+mod common;
 mod middleware;
 mod socket_client;
+
+use common::config_path;
 
 use crate::api::Api;
 use actix_files::Files;
@@ -30,12 +33,6 @@ use uuid::Uuid;
 
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
-
-macro_rules! config_path {
-    ($filename:expr) => {{
-        Path::new("/data/").join("config/").join($filename)
-    }};
-}
 
 macro_rules! update_os_path {
     () => {{

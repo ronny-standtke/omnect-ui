@@ -1813,16 +1813,19 @@ dependencies = [
 
 [[package]]
 name = "omnect-ui"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "actix-files",
+ "actix-http",
  "actix-multipart",
  "actix-rt",
+ "actix-service",
  "actix-session",
  "actix-web",
  "actix-web-httpauth",
  "anyhow",
  "argon2",
+ "base64 0.22.1",
  "env_logger",
  "http-body-util",
  "hyper",
@@ -1836,6 +1839,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_repr",
+ "tempfile",
  "tokio",
  "uuid",
 ]
@@ -2527,11 +2531,10 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.18.0"
+version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c317e0a526ee6120d8dabad239c8dadca62b24b6f168914bbbc8e2fb1f0e567"
+checksum = "7437ac7763b9b123ccf33c338a5cc1bac6f69b45a136c19bdd8a65e3916435bf"
 dependencies = [
- "cfg-if",
  "fastrand",
  "getrandom 0.3.2",
  "once_cell",

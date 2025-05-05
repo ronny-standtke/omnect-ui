@@ -1,3 +1,4 @@
+use crate::common::config_path;
 use crate::socket_client::*;
 use crate::{middleware::TOKEN_EXPIRE_HOURS, validate_password};
 use actix_files::NamedFile;
@@ -22,12 +23,6 @@ use std::{
 macro_rules! data_path {
     ($filename:expr) => {{
         Path::new("/data/").join($filename)
-    }};
-}
-
-macro_rules! config_path {
-    ($filename:expr) => {{
-        Path::new("/data/").join("config/").join($filename)
     }};
 }
 
