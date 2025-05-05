@@ -151,7 +151,7 @@ async fn main() {
     fs::exists("/data").expect("data dir /data is missing");
 
     fn session_middleware() -> SessionMiddleware<CookieSessionStore> {
-        SessionMiddleware::builder(CookieSessionStore::default(), Key::from(&[0; 64]))
+        SessionMiddleware::builder(CookieSessionStore::default(), Key::generate())
             .cookie_name(String::from("omnect-ui-session"))
             .cookie_secure(true)
             .session_lifecycle(BrowserSession::default())
