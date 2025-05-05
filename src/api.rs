@@ -1,6 +1,6 @@
-use crate::common::config_path;
+use crate::common::{config_path, validate_password};
+use crate::middleware::TOKEN_EXPIRE_HOURS;
 use crate::socket_client::*;
-use crate::{middleware::TOKEN_EXPIRE_HOURS, validate_password};
 use actix_files::NamedFile;
 use actix_multipart::form::{tempfile::TempFile, MultipartForm};
 use actix_session::Session;
@@ -191,17 +191,16 @@ impl Api {
             return HttpResponse::BadRequest().body("update file is missing");
         };
 
-        let _ = Api::clear_data_folder().await;
+        let _ = Api::clear_data_folder();
 
         if let Err(e) =
             Api::persist_uploaded_file(form.file, &tmp_path!(&filename), &data_path!(&filename))
-                .await
         {
             error!("save_file() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{e}"));
         }
 
-        if let Err(e) = Api::set_file_permission(&data_path!(&filename)).await {
+        if let Err(e) = Api::set_file_permission(&data_path!(&filename)) {
             error!("save_file() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{e}"));
         }
@@ -253,7 +252,7 @@ impl Api {
                 .finish();
         }
 
-        if let Err(e) = Api::store_or_update_password(&body.password).await {
+        if let Err(e) = Api::store_or_update_password(&body.password) {
             error!("set_password() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{:#}", e));
         }
@@ -272,7 +271,7 @@ impl Api {
             return HttpResponse::BadRequest().body("current password is not correct");
         }
 
-        if let Err(e) = Api::store_or_update_password(&body.password).await {
+        if let Err(e) = Api::store_or_update_password(&body.password) {
             error!("update_password() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{:#}", e));
         }
@@ -293,7 +292,7 @@ impl Api {
         HttpResponse::Ok().finish()
     }
 
-    async fn clear_data_folder() -> Result<()> {
+    fn clear_data_folder() -> Result<()> {
         debug!("clear_data_folder() called");
         for entry in fs::read_dir("/data")? {
             let entry = entry?;
@@ -305,11 +304,7 @@ impl Api {
         Ok(())
     }
 
-    async fn persist_uploaded_file(
-        tmp_file: TempFile,
-        temp_path: &Path,
-        data_path: &Path,
-    ) -> Result<()> {
+    fn persist_uploaded_file(tmp_file: TempFile, temp_path: &Path, data_path: &Path) -> Result<()> {
         debug!("persist_uploaded_file() called");
 
         tmp_file
@@ -322,7 +317,7 @@ impl Api {
         Ok(())
     }
 
-    async fn set_file_permission(file_path: &Path) -> Result<()> {
+    fn set_file_permission(file_path: &Path) -> Result<()> {
         debug!("set_file_permission() called");
 
         let metadata = fs::metadata(file_path).context("failed to get file metadata")?;
@@ -339,7 +334,7 @@ impl Api {
         !password_file.exists()
     }
 
-    async fn hash_password(password: &str) -> Result<String> {
+    fn hash_password(password: &str) -> Result<String> {
         debug!("hash_password() called");
 
         let salt = SaltString::generate(&mut OsRng);
@@ -354,7 +349,7 @@ impl Api {
         }
     }
 
-    async fn store_or_update_password(password: &str) -> Result<()> {
+    fn store_or_update_password(password: &str) -> Result<()> {
         debug!("store_or_update_password() called");
 
         let password_file = config_path!("password");
@@ -371,7 +366,7 @@ impl Api {
             }
         }
 
-        let Ok(hash) = Api::hash_password(password).await else {
+        let Ok(hash) = Api::hash_password(password) else {
             error!("failed to hash password");
             bail!("failed to hash password");
         };

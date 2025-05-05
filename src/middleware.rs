@@ -15,7 +15,8 @@ use std::{
     rc::Rc,
 };
 
-use crate::{api::Api, validate_password};
+use crate::api::Api;
+use crate::common::validate_password;
 
 pub const TOKEN_EXPIRE_HOURS: u64 = 2;
 
@@ -59,10 +60,10 @@ where
     forward_ready!(service);
 
     fn call(&self, mut req: ServiceRequest) -> Self::Future {
-        let service = Rc::clone(&self.service);
+        let service = self.service.clone();
 
         Box::pin(async move {
-            let Some(api_config) = req.app_data::<Data<Api>>().cloned() else {
+            let Some(api_config) = req.app_data::<Data<Api>>() else {
                 let http_res = HttpResponse::InternalServerError().finish();
                 let (http_req, _) = req.into_parts();
                 return Ok(ServiceResponse::new(http_req, http_res).map_into_right_body());
@@ -78,7 +79,6 @@ where
 
             if !token.is_empty()
                 && verify_token(&token, &api_config.centrifugo_client_token_hmac_secret_key)
-                    .is_ok_and(|res| res)
             {
                 let res = service.call(req).await?;
                 Ok(res.map_into_left_body())
@@ -89,7 +89,7 @@ where
                     return Ok(unauthorized_error(req).map_into_right_body());
                 };
 
-                if verify_user(auth).await {
+                if verify_user(auth) {
                     let res = service.call(req).await?;
                     Ok(res.map_into_left_body())
                 } else {
@@ -100,7 +100,7 @@ where
     }
 }
 
-pub fn verify_token(token: &str, centrifugo_client_token_hmac_secret_key: &str) -> Result<bool> {
+pub fn verify_token(token: &str, centrifugo_client_token_hmac_secret_key: &str) -> bool {
     let key = HS256Key::from_bytes(centrifugo_client_token_hmac_secret_key.as_bytes());
     let options = VerificationOptions {
         accept_future: true,
@@ -110,12 +110,11 @@ pub fn verify_token(token: &str, centrifugo_client_token_hmac_secret_key: &str) 
         ..Default::default()
     };
 
-    Ok(key
-        .verify_token::<NoCustomClaims>(token, Some(options))
-        .is_ok())
+    key.verify_token::<NoCustomClaims>(token, Some(options))
+        .is_ok()
 }
 
-async fn verify_user(auth: BasicAuth) -> bool {
+fn verify_user(auth: BasicAuth) -> bool {
     let Some(password) = auth.password() else {
         return false;
     };
@@ -474,7 +473,7 @@ mod tests {
         let claim = generate_valid_claim();
         let (token, key) = generate_token_and_key(claim);
 
-        assert!(verify_token(token.as_str(), &key).unwrap());
+        assert!(verify_token(token.as_str(), &key));
     }
 
     #[tokio::test]
@@ -482,7 +481,7 @@ mod tests {
         let claim = generate_expired_claim();
         let (token, key) = generate_token_and_key(claim);
 
-        assert!(!verify_token(token.as_str(), &key).unwrap());
+        assert!(!verify_token(token.as_str(), &key));
     }
 
     #[tokio::test]
@@ -490,12 +489,12 @@ mod tests {
         let claim = generate_unset_subject_claim();
         let (token, key) = generate_token_and_key(claim);
 
-        assert!(!verify_token(token.as_str(), &key).unwrap());
+        assert!(!verify_token(token.as_str(), &key));
 
         let claim = generate_invalid_subject_claim();
         let (token, key) = generate_token_and_key(claim);
 
-        assert!(!verify_token(token.as_str(), &key).unwrap());
+        assert!(!verify_token(token.as_str(), &key));
     }
 
     #[tokio::test]
@@ -504,7 +503,7 @@ mod tests {
         let (_, key) = generate_token_and_key(claim);
         let token = "someinvalidtestbytes".to_string();
 
-        assert!(!verify_token(token.as_str(), &key).unwrap());
+        assert!(!verify_token(token.as_str(), &key));
     }
 
     #[tokio::test]
@@ -513,7 +512,7 @@ mod tests {
 
         let expected = false;
 
-        let result = verify_user(basic_auth).await;
+        let result = verify_user(basic_auth);
 
         assert_eq!(expected, result);
     }

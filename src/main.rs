@@ -3,8 +3,6 @@ mod common;
 mod middleware;
 mod socket_client;
 
-use common::config_path;
-
 use crate::api::Api;
 use actix_files::Files;
 use actix_multipart::form::MultipartFormConfig;
@@ -19,14 +17,11 @@ use actix_web::{
     web::{self, Data},
     App, HttpResponse, HttpServer, Responder,
 };
-use anyhow::{bail, Result};
-use argon2::{Argon2, PasswordHash, PasswordVerifier};
+use anyhow::Result;
 use env_logger::{Builder, Env, Target};
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::Write;
-use std::{fs, path::Path};
+use std::{fs, fs::File, io::Write};
 use tokio::process::Command;
 use tokio::signal::unix::{signal, SignalKind};
 use uuid::Uuid;
@@ -406,35 +401,4 @@ async fn delete_publish_endpoint(ods_socket_path: &str) -> impl Responder {
     }
 
     HttpResponse::Ok().finish()
-}
-
-pub fn validate_password(password: &str) -> Result<()> {
-    if password.is_empty() {
-        error!("password is empty");
-        bail!("password is empty");
-    }
-
-    let password_file = config_path!("password");
-
-    let Ok(password_hash) = fs::read_to_string(password_file) else {
-        error!("failed to read password file");
-        bail!("failed to read password file");
-    };
-
-    if password_hash.is_empty() {
-        error!("password hash is empty");
-        bail!("password hash is empty");
-    }
-
-    let Ok(parsed_hash) = PasswordHash::new(&password_hash) else {
-        error!("failed to parse password hash");
-        bail!("failed to parse password hash");
-    };
-
-    if let Err(e) = Argon2::default().verify_password(password.as_bytes(), &parsed_hash) {
-        error!("password verification failed: {e:#}");
-        bail!("password verification failed");
-    }
-
-    Ok(())
 }
