@@ -30,7 +30,7 @@ const deviceInfo: Ref<Map<string, string | number>> = computed(
 			["Wait online timeout (in seconds)", timeouts.value?.wait_online_timeout.secs ?? "n/a"],
 			["omnect device service version", systemInfo.value?.omnect_device_service_version ?? "n/a"],
 			["Azure SDK version", systemInfo.value?.azure_sdk_version ?? "n/a"],
-			["Factory rest status", factoryResetStatus.value],
+			["Factory reset status", factoryResetStatus.value],
 			["Update status", updateStatus.value]
 		])
 )

@@ -85,8 +85,19 @@ struct PublishIdEndpoint {
     endpoint: PublishEndpoint,
 }
 
-const CERT_PATH: &str = "/cert/cert.pem";
-const KEY_PATH: &str = "/cert/key.pem";
+macro_rules! cert_path {
+    () => {{
+        static CERT_PATH_DEFAULT: &'static str = "/cert/cert.pem";
+        std::env::var("CERT_PATH").unwrap_or(CERT_PATH_DEFAULT.to_string())
+    }};
+}
+
+macro_rules! key_path {
+    () => {{
+        static KEY_PATH_DEFAULT: &'static str = "/cert/key.pem";
+        std::env::var("KEY_PATH").unwrap_or(KEY_PATH_DEFAULT.to_string())
+    }};
+}
 
 #[actix_web::main]
 async fn main() {
@@ -124,9 +135,9 @@ async fn main() {
     create_module_certificate().await;
 
     let mut tls_certs =
-        std::io::BufReader::new(std::fs::File::open(CERT_PATH).expect("read certs_file"));
+        std::io::BufReader::new(std::fs::File::open(cert_path!()).expect("read certs_file"));
     let mut tls_key =
-        std::io::BufReader::new(std::fs::File::open(KEY_PATH).expect("read key_file"));
+        std::io::BufReader::new(std::fs::File::open(key_path!()).expect("read key_file"));
 
     let tls_certs = rustls_pemfile::certs(&mut tls_certs)
         .collect::<Result<Vec<_>, _>>()
@@ -261,8 +272,8 @@ async fn main() {
     let server_handle = server.handle();
     let server_task = tokio::spawn(server);
 
-    std::env::set_var("CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM", CERT_PATH);
-    std::env::set_var("CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM", KEY_PATH);
+    std::env::set_var("CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM", cert_path!());
+    std::env::set_var("CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM", key_path!());
 
     let mut centrifugo =
         Command::new(std::fs::canonicalize("centrifugo").expect("centrifugo not found"))
@@ -337,15 +348,15 @@ async fn create_module_certificate() -> impl Responder {
             let cert_response: CreateCertResponse =
                 serde_json::from_slice(&body_bytes).expect("CreateCertResponse not possible");
 
-            let mut file = File::create(CERT_PATH)
-                .unwrap_or_else(|_| panic!("{CERT_PATH} could not be created"));
+            let mut file = File::create(cert_path!())
+                .unwrap_or_else(|_| panic!("{} could not be created", cert_path!()));
             file.write_all(cert_response.certificate.as_bytes())
-                .unwrap_or_else(|_| panic!("write to {CERT_PATH} not possible"));
+                .unwrap_or_else(|_| panic!("write to {} not possible", cert_path!()));
 
-            let mut file = File::create(KEY_PATH)
-                .unwrap_or_else(|_| panic!("{KEY_PATH} could not be created"));
+            let mut file = File::create(key_path!())
+                .unwrap_or_else(|_| panic!("{} could not be created", key_path!()));
             file.write_all(cert_response.private_key.bytes.as_bytes())
-                .unwrap_or_else(|_| panic!("write to {KEY_PATH} not possible"));
+                .unwrap_or_else(|_| panic!("write to {} not possible", key_path!()));
 
             HttpResponse::Ok().finish()
         }

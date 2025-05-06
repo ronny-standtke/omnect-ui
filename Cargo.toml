@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 name = "omnect-ui"
 readme = "README.md"
 repository = "git@github.com:omnect/omnect-ui.git"
-version = "0.10.3"
+version = "0.11.0"
 build = "src/build.rs"
 
 [dependencies]
