@@ -5,7 +5,7 @@ use actix_files::NamedFile;
 use actix_multipart::form::{tempfile::TempFile, MultipartForm};
 use actix_session::Session;
 use actix_web::{web, HttpResponse, Responder};
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
     Argon2,
@@ -342,10 +342,7 @@ impl Api {
 
         match argon2.hash_password(password.as_bytes(), &salt) {
             Ok(hash) => Ok(hash.to_string()),
-            Err(e) => {
-                error!("hash_password() failed: {:#}", e);
-                bail!("failed to hash password");
-            }
+            Err(e) => Err(anyhow!(e).context("failed to hash password")),
         }
     }
 
@@ -355,32 +352,17 @@ impl Api {
         let password_file = config_path!("password");
 
         if Api::set_password_necessary() {
-            if let Some(parent) = password_file.parent() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    error!("failed to create password directory: {:#}", e);
-                    bail!("failed to create password directory: {:#}", e);
-                }
-            } else {
-                error!("failed to get parent directory for password file");
-                bail!("failed to get parent directory for password file");
-            }
+            let Some(parent) = password_file.parent() else {
+                bail!("failed to get parent directory for password file")
+            };
+
+            fs::create_dir_all(parent).context("failed to create password directory")?;
         }
 
-        let Ok(hash) = Api::hash_password(password) else {
-            error!("failed to hash password");
-            bail!("failed to hash password");
-        };
+        let hash = Api::hash_password(password)?;
+        let mut file = File::create(&password_file).context("failed to create password file")?;
 
-        let Ok(mut file) = File::create(&password_file) else {
-            error!("failed to create password file");
-            bail!("failed to create password file");
-        };
-
-        if let Err(e) = file.write_all(hash.as_bytes()) {
-            error!("failed to write password file: {:#}", e);
-            bail!("failed to write password file: {:#}", e);
-        }
-
-        Ok(())
+        file.write_all(hash.as_bytes())
+            .context("failed to write password file")
     }
 }
