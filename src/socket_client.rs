@@ -33,6 +33,17 @@ pub async fn post_with_empty_body(path: &str, socket_path: &str) -> Result<HttpR
     send_request(request, socket_path).await
 }
 
+pub async fn get_with_empty_body(path: &str, socket_path: &str) -> Result<HttpResponse> {
+    let request = Request::builder()
+        .uri(path)
+        .method("GET")
+        .header("Host", "localhost")
+        .body(String::new())
+        .context("build request failed")?;
+
+    send_request(request, socket_path).await
+}
+
 pub async fn delete_with_empty_body(path: &str, socket_path: &str) -> Result<HttpResponse> {
     let request = Request::builder()
         .uri(path)

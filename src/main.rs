@@ -1,4 +1,5 @@
 mod api;
+mod certificate;
 mod common;
 mod middleware;
 mod socket_client;
@@ -12,7 +13,6 @@ use actix_session::{
     SessionMiddleware,
 };
 use actix_web::{
-    body::MessageBody,
     cookie::{Key, SameSite},
     web::{self, Data},
     App, HttpResponse, HttpServer, Responder,
@@ -20,10 +20,12 @@ use actix_web::{
 use anyhow::Result;
 use env_logger::{Builder, Env, Target};
 use log::{debug, error, info};
-use serde::{Deserialize, Serialize};
-use std::{fs, fs::File, io::Write};
-use tokio::process::Command;
-use tokio::signal::unix::{signal, SignalKind};
+use serde::Serialize;
+use std::{fs, io::Write};
+use tokio::{
+    process::Command,
+    signal::unix::{signal, SignalKind},
+};
 use uuid::Uuid;
 
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
@@ -42,29 +44,6 @@ macro_rules! centrifugo_http_server_port {
         std::env::var("CENTRIFUGO_HTTP_SERVER_PORT")
             .unwrap_or(CENTRIFUGO_HTTP_SERVER_PORT_DEFAULT.to_string())
     }};
-}
-
-#[derive(Serialize)]
-struct CreateCertPayload {
-    #[serde(rename = "commonName")]
-    common_name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct PrivateKey {
-    #[serde(rename = "type")]
-    #[allow(dead_code)]
-    type_name: String,
-    bytes: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateCertResponse {
-    #[serde(rename = "privateKey")]
-    private_key: PrivateKey,
-    certificate: String,
-    #[allow(dead_code)]
-    expiration: String,
 }
 
 #[derive(Serialize)]
@@ -132,7 +111,9 @@ async fn main() {
         .parse::<u64>()
         .expect("UI_PORT format");
 
-    create_module_certificate().await;
+    certificate::create_module_certificate(&cert_path!(), &key_path!())
+        .await
+        .expect("Failed to create module certificate");
 
     let mut tls_certs =
         std::io::BufReader::new(std::fs::File::open(cert_path!()).expect("read certs_file"));
@@ -310,61 +291,6 @@ async fn main() {
     }
 
     debug!("good bye");
-}
-
-#[cfg(feature = "mock")]
-async fn create_module_certificate() -> impl Responder {
-    HttpResponse::Ok().finish()
-}
-
-#[cfg(not(feature = "mock"))]
-async fn create_module_certificate() -> impl Responder {
-    info!("create_module_certificate()");
-
-    let iotedge_moduleid = std::env::var("IOTEDGE_MODULEID").expect("IOTEDGE_MODULEID missing");
-    let iotedge_deviceid = std::env::var("IOTEDGE_DEVICEID").expect("IOTEDGE_DEVICEID missing");
-    let iotedge_modulegenerationid =
-        std::env::var("IOTEDGE_MODULEGENERATIONID").expect("IOTEDGE_MODULEGENERATIONID missing");
-    let iotedge_apiversion =
-        std::env::var("IOTEDGE_APIVERSION").expect("IOTEDGE_APIVERSION missing");
-
-    let iotedge_workloaduri =
-        std::env::var("IOTEDGE_WORKLOADURI").expect("IOTEDGE_WORKLOADURI missing");
-
-    let payload = CreateCertPayload {
-        common_name: iotedge_deviceid.to_string(),
-    };
-    let path = format!(
-        "/modules/{}/genid/{}/certificate/server?api-version={}",
-        iotedge_moduleid, iotedge_modulegenerationid, iotedge_apiversion
-    );
-    let ori_socket_path = iotedge_workloaduri.to_string();
-    let socket_path = ori_socket_path.strip_prefix("unix://").unwrap();
-
-    match socket_client::post_with_json_body(&path, payload, socket_path).await {
-        Ok(response) => {
-            let body = response.into_body();
-            let body_bytes = body.try_into_bytes().unwrap();
-            let cert_response: CreateCertResponse =
-                serde_json::from_slice(&body_bytes).expect("CreateCertResponse not possible");
-
-            let mut file = File::create(cert_path!())
-                .unwrap_or_else(|_| panic!("{} could not be created", cert_path!()));
-            file.write_all(cert_response.certificate.as_bytes())
-                .unwrap_or_else(|_| panic!("write to {} not possible", cert_path!()));
-
-            let mut file = File::create(key_path!())
-                .unwrap_or_else(|_| panic!("{} could not be created", key_path!()));
-            file.write_all(cert_response.private_key.bytes.as_bytes())
-                .unwrap_or_else(|_| panic!("write to {} not possible", key_path!()));
-
-            HttpResponse::Ok().finish()
-        }
-        Err(e) => {
-            error!("create_module_certificate failed: {e:#}");
-            HttpResponse::InternalServerError().finish()
-        }
-    }
 }
 
 async fn send_publish_endpoint(

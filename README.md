@@ -14,7 +14,7 @@ Since omnect-os is designed as generic OS, all specific or optional applications
 
 ## Access omnect-ui
 
-omnect-ui can be reached at <https://DeviceHostnameOrIp:1977><br>
+omnect-ui can be reached at <https://DeviceIp:1977><br>
 
 Login with the configured credentials<br>
 ![login](docu/login.png)<br>
