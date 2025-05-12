@@ -1,4 +1,4 @@
-use crate::common::{config_path, validate_password};
+use crate::common::{config_path, validate_password, validate_token_and_claims};
 use crate::middleware::TOKEN_EXPIRE_HOURS;
 use crate::socket_client::*;
 use actix_files::NamedFile;
@@ -12,6 +12,7 @@ use argon2::{
 };
 use jwt_simple::prelude::*;
 use log::{debug, error};
+use serde::Deserialize;
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     fs::{self, File},
@@ -86,6 +87,8 @@ pub struct Api {
     pub update_os_path: String,
     pub centrifugo_client_token_hmac_secret_key: String,
     pub index_html: PathBuf,
+    pub keycloak_public_key_url: String,
+    pub tenant: String,
 }
 
 impl Api {
@@ -102,6 +105,15 @@ impl Api {
         }
 
         Ok(NamedFile::open(&config.index_html)?)
+    }
+
+    pub async fn config() -> actix_web::Result<NamedFile> {
+        Ok(NamedFile::open(config_path!("app_config.js"))?)
+    }
+
+    pub async fn healthcheck() -> impl Responder {
+        debug!("healthcheck() called");
+        HttpResponse::Ok().finish()
     }
 
     pub async fn factory_reset(
@@ -151,25 +163,14 @@ impl Api {
         }
     }
 
-    pub async fn token(session: Session) -> impl Responder {
-        if let Ok(key) = std::env::var("CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY") {
-            let key = HS256Key::from_bytes(key.as_bytes());
-            let claims =
-                Claims::create(Duration::from_hours(TOKEN_EXPIRE_HOURS)).with_subject("omnect-ui");
-
-            if let Ok(token) = key.authenticate(claims) {
-                match session.insert("token", token.clone()) {
-                    Ok(_) => return HttpResponse::Ok().body(token),
-                    Err(e) => return HttpResponse::InternalServerError().body(format!("{e}")),
-                }
-            } else {
-                error!("token: cannot create token");
-            };
-        } else {
-            error!("token: missing secret key");
-        };
-
-        HttpResponse::InternalServerError().finish()
+    pub async fn token(session: Session, config: web::Data<Api>) -> impl Responder {
+        match Api::set_session_token(session, config) {
+            Ok(token) => HttpResponse::Ok().body(token),
+            Err(e) => {
+                error!("token() failed: {e:#}");
+                HttpResponse::InternalServerError().body(format!("{e}"))
+            }
+        }
     }
 
     pub async fn logout(session: Session) -> impl Responder {
@@ -243,7 +244,11 @@ impl Api {
         }
     }
 
-    pub async fn set_password(body: web::Json<SetPasswordPayload>) -> impl Responder {
+    pub async fn set_password(
+        body: web::Json<SetPasswordPayload>,
+        session: Session,
+        config: web::Data<Api>,
+    ) -> impl Responder {
         debug!("set_password() called");
 
         if !Api::set_password_necessary() {
@@ -257,7 +262,13 @@ impl Api {
             return HttpResponse::InternalServerError().body(format!("{:#}", e));
         }
 
-        HttpResponse::Ok().finish()
+        match Api::set_session_token(session, config) {
+            Ok(token) => HttpResponse::Ok().body(token),
+            Err(e) => {
+                error!("token() failed: {e:#}");
+                HttpResponse::InternalServerError().body(format!("{e}"))
+            }
+        }
     }
 
     pub async fn update_password(
@@ -289,6 +300,23 @@ impl Api {
                 .finish();
         }
 
+        HttpResponse::Ok().finish()
+    }
+
+    pub async fn validate_portal_token(body: String, config: web::Data<Api>) -> impl Responder {
+        debug!("validate_portal_token() called");
+
+        if let Err(e) = validate_token_and_claims(
+            &body,
+            &config.keycloak_public_key_url,
+            &config.tenant,
+            &config.ods_socket_path,
+        )
+        .await
+        {
+            error!("validate_portal_token() failed: {e:#}");
+            return HttpResponse::Unauthorized().finish();
+        }
         HttpResponse::Ok().finish()
     }
 
@@ -364,5 +392,19 @@ impl Api {
 
         file.write_all(hash.as_bytes())
             .context("failed to write password file")
+    }
+
+    fn set_session_token(session: Session, config: web::Data<Api>) -> Result<String> {
+        let key = HS256Key::from_bytes(config.centrifugo_client_token_hmac_secret_key.as_bytes());
+        let claims =
+            Claims::create(Duration::from_hours(TOKEN_EXPIRE_HOURS)).with_subject("omnect-ui");
+
+        let token = key.authenticate(claims).context("failed to create token")?;
+
+        let _ = session
+            .insert("token", &token)
+            .context("failed to insert token into session");
+
+        Ok(token)
     }
 }

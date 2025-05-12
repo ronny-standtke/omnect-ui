@@ -41,7 +41,12 @@ const doLogin = async (e: Event) => {
 	}
 }
 
-onMounted(() => {
+onMounted(async () => {
+	const requireSetPassword = await fetch("require-set-password")
+	if (requireSetPassword.status === 201) {
+		await router.push(requireSetPassword.headers.get("Location") ?? "/set-password")
+	}
+
 	unsubscribeAll()
 	disconnect()
 })

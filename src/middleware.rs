@@ -288,6 +288,8 @@ mod tests {
             update_os_path: "/some/update/os/path".to_string(),
             centrifugo_client_token_hmac_secret_key: session_secret.to_string(),
             index_html: Path::new("/some/index/html/path").to_path_buf(),
+            keycloak_public_key_url: "https://some/keycloak/public/key/url".to_string(),
+            tenant: "cp".to_string(),
         };
 
         test::init_service(

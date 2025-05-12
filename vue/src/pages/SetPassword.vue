@@ -2,10 +2,10 @@
 import { onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
 import OmnectLogo from "../components/OmnectLogo.vue"
-import { useSnackbar } from "../composables/useSnackbar"
+import { useCentrifuge } from "../composables/useCentrifugo"
 
 const router = useRouter()
-const { showSuccess } = useSnackbar()
+const { initializeCentrifuge } = useCentrifuge()
 const password = ref<string>("")
 const repeatPassword = ref<string>("")
 const visible = ref(false)
@@ -28,8 +28,8 @@ const handleSubmit = async (): Promise<void> => {
 			})
 
 			if (res.ok) {
-				showSuccess("Password set successfully.")
-				await router.push("/login")
+				initializeCentrifuge()
+				await router.push("/")
 			} else {
 				errorMsg.value = "Something went wrong while setting your password."
 			}

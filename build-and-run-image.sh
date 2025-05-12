@@ -29,6 +29,8 @@ docker run --rm \
   -e CENTRIFUGO_ADMIN_PASSWORD=123 \
   -e CENTRIFUGO_ADMIN_SECRET=123 \
   -e DATA_DIR_PATH=/data \
+  -e KEYCLOAK_URL=https://keycloak.omnect.conplement.cloud/realms/cp-dev \
+  -e TENANT=cp \
   -p "${omnect_ui_port}":"${omnect_ui_port}" \
   -p "${centrifugo_port}":"${centrifugo_port}" \
   omnect-ui-x86:"local_${omnect_ui_version}"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios"
-import { type Ref, computed, onBeforeMount, ref } from "vue"
+import { type Ref, computed, onMounted, ref } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useDisplay } from "vuetify"
 import BaseSideBar from "./components/BaseSideBar.vue"
@@ -36,26 +36,12 @@ const updateSidebarVisibility = (visible: boolean) => {
 	showSideBar.value = visible
 }
 
-onBeforeMount(async () => {
-	try {
-		const requireSetPassword = await fetch("require-set-password")
-		if (requireSetPassword.status === 201) {
-			await router.push(requireSetPassword.headers.get("Location") ?? "/set-password")
-		} else {
-			const res = await fetch("token/refresh")
-			if (!res.ok) {
-				router.push("/login")
-			} else {
-				initializeCentrifuge()
-			}
-		}
-	} catch {
-		router.push("/login")
-	}
+onMounted(async () => {
+	initializeCentrifuge()
 })
 
 const showBars = computed(() => {
-	return route.path !== "/login" && route.path !== "/set-password"
+	return route.path !== "/login" && route.path !== "/set-password" && route.path !== "/auth-callback"
 })
 </script>
 

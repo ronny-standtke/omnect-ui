@@ -20,6 +20,7 @@ use actix_web::{
 use anyhow::Result;
 use env_logger::{Builder, Env, Target};
 use log::{debug, error, info};
+use rustls::crypto::{ring::default_provider, CryptoProvider};
 use serde::Serialize;
 use std::{fs, io::Write};
 use tokio::{
@@ -43,6 +44,14 @@ macro_rules! centrifugo_http_server_port {
         static CENTRIFUGO_HTTP_SERVER_PORT_DEFAULT: &'static str = "8000";
         std::env::var("CENTRIFUGO_HTTP_SERVER_PORT")
             .unwrap_or(CENTRIFUGO_HTTP_SERVER_PORT_DEFAULT.to_string())
+    }};
+}
+
+macro_rules! keycloak_url {
+    () => {{
+        static KEYCLOAK_URL: &'static str =
+            "https://keycloak.omnect.conplement.cloud/realms/cp-prod";
+        std::env::var("KEYCLOAK_URL").unwrap_or(KEYCLOAK_URL.to_string())
     }};
 }
 
@@ -111,6 +120,8 @@ async fn main() {
         .parse::<u64>()
         .expect("UI_PORT format");
 
+    CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
+
     certificate::create_module_certificate(&cert_path!(), &key_path!())
         .await
         .expect("Failed to create module certificate");
@@ -170,6 +181,8 @@ async fn main() {
     let index_html =
         std::fs::canonicalize("static/index.html").expect("static/index.html not found");
 
+    let tenant = std::env::var("TENANT").expect("env TENANT is missing");
+
     fs::exists(&ods_socket_path).unwrap_or_else(|_| {
         panic!(
             "omnect device service socket file {} does not exist",
@@ -180,6 +193,9 @@ async fn main() {
     fs::exists(&update_os_path!())
         .unwrap_or_else(|_| panic!("path {} for os update does not exist", &update_os_path!()));
 
+    common::create_frontend_config_file(&keycloak_url!())
+        .expect("failed to create frontend config file");
+
     send_publish_endpoint(&centrifugo_http_api_key, &ods_socket_path).await;
 
     let api_config = Api {
@@ -187,6 +203,8 @@ async fn main() {
         update_os_path: update_os_path!(),
         centrifugo_client_token_hmac_secret_key,
         index_html,
+        keycloak_public_key_url: keycloak_url!(),
+        tenant,
     };
 
     let server = HttpServer::new(move || {
@@ -199,6 +217,7 @@ async fn main() {
             )
             .app_data(Data::new(api_config.clone()))
             .route("/", web::get().to(Api::index))
+            .route("/config.js", web::get().to(Api::config))
             .route(
                 "/factory-reset",
                 web::post().to(Api::factory_reset).wrap(middleware::AuthMw),
@@ -232,6 +251,10 @@ async fn main() {
                 web::get().to(Api::token).wrap(middleware::AuthMw),
             )
             .route(
+                "/token/validate",
+                web::post().to(Api::validate_portal_token),
+            )
+            .route(
                 "/require-set-password",
                 web::get().to(Api::require_set_password),
             )
@@ -239,6 +262,7 @@ async fn main() {
             .route("/update-password", web::post().to(Api::update_password))
             .route("/version", web::get().to(Api::version))
             .route("/logout", web::post().to(Api::logout))
+            .route("/healthcheck", web::get().to(Api::healthcheck))
             .service(Files::new(
                 "/static",
                 std::fs::canonicalize("static").expect("static folder not found"),

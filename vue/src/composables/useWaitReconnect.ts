@@ -20,7 +20,7 @@ export function useWaitReconnect() {
 
 	const checkReconnect = async () => {
 		try {
-			const res = await axios.get("/", {
+			const res = await axios.get("/healthcheck", {
 				headers: {
 					"Cache-Control": "no-cache, no-store, must-revalidate",
 					Pragma: "no-cache",

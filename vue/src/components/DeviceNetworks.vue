@@ -1,45 +1,13 @@
 <script setup lang="ts">
-import { useFetch } from "@vueuse/core"
 import { type Ref, onMounted, ref } from "vue"
-import { useRouter } from "vue-router"
 import { useCentrifuge } from "../composables/useCentrifugo"
-import { useSnackbar } from "../composables/useSnackbar"
 import { CentrifugeSubscriptionType } from "../enums/centrifuge-subscription-type.enum"
 import type { NetworkStatus } from "../types"
 import KeyValuePair from "./ui-components/KeyValuePair.vue"
 
 const networkStatus: Ref<NetworkStatus | undefined> = ref(undefined)
-const { snackbarState, showError } = useSnackbar()
-const router = useRouter()
+
 const { history, subscribe, onConnected } = useCentrifuge()
-
-const showSuccess = (successMsg: string) => {
-	snackbarState.msg = successMsg
-	snackbarState.color = "success"
-	snackbarState.timeout = 2000
-	snackbarState.snackbar = true
-}
-
-const {
-	onFetchError: onReloadNetworkError,
-	error: reloadNetworkError,
-	statusCode: reloadNetworkStatusCode,
-	onFetchResponse: onReloadNetworkSuccess,
-	execute: reloadNetwork,
-	isFetching: reloadNetworkLoading
-} = useFetch("reload-network", { immediate: false }).post()
-
-onReloadNetworkSuccess(() => {
-	showSuccess("Reload network successful.")
-})
-
-onReloadNetworkError(() => {
-	if (reloadNetworkStatusCode.value === 401) {
-		router.push("/login")
-	} else {
-		showError(`Reloading network failed: ${JSON.stringify(reloadNetworkError.value)}`)
-	}
-})
 
 const updateNetworkStatus = (data: NetworkStatus) => {
 	networkStatus.value = data
@@ -63,9 +31,6 @@ onMounted(() => {
   <div class="flex flex-col gap-y-4">
     <div class="flex border-b gap-x-4 items-center">
       <div class="text-h4 text-secondary">Network</div>
-      <v-btn prepend-icon="mdi-refresh" :loading="reloadNetworkLoading" @click="reloadNetwork(false)"
-        variant="text">Reload
-        network</v-btn>
     </div>
     <div class="gap-y-4 flex flex-col py-8" v-for="(network) of networkStatus?.network_status" :key="network.name">
       <div class="flex gap-x-4 items-center">

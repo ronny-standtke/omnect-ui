@@ -1,4 +1,4 @@
-use crate::socket_client;
+use crate::{common, socket_client};
 use actix_web::body::MessageBody;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
@@ -26,34 +26,6 @@ struct CreateCertResponse {
     certificate: String,
     #[allow(dead_code)]
     expiration: String,
-}
-
-#[derive(Deserialize)]
-struct StatusResponse {
-    #[serde(rename = "NetworkStatus")]
-    network_status: NetworkStatus,
-}
-
-#[derive(Deserialize)]
-struct NetworkStatus {
-    #[serde(rename = "network_status")]
-    network_interfaces: Vec<NetworkInterface>,
-}
-
-#[derive(Deserialize)]
-struct NetworkInterface {
-    online: bool,
-    ipv4: Ipv4Info,
-}
-
-#[derive(Deserialize)]
-struct Ipv4Info {
-    addrs: Vec<Ipv4AddrInfo>,
-}
-
-#[derive(Deserialize)]
-struct Ipv4AddrInfo {
-    addr: String,
 }
 
 #[cfg(feature = "mock")]
@@ -105,16 +77,9 @@ pub async fn create_module_certificate(cert_path: &str, key_path: &str) -> Resul
 }
 
 async fn get_ip_address(ods_socket_path: &str) -> Result<String> {
-    let response = socket_client::get_with_empty_body("/status/v1", ods_socket_path)
+    let status_response = common::get_status(ods_socket_path)
         .await
         .context("Failed to get status from socket client")?;
-    let body_bytes = response
-        .into_body()
-        .try_into_bytes()
-        .map_err(|e| anyhow!("Failed to convert response body into bytes: {e:?}"))?;
-
-    let status_response: StatusResponse =
-        serde_json::from_slice(&body_bytes).context("Failed to parse StatusResponse from JSON")?;
 
     status_response
         .network_status
