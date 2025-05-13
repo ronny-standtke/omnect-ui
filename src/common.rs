@@ -5,7 +5,7 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
 use reqwest::blocking::get;
 use serde::{Deserialize, Serialize};
-use std::{io::Write, path::Path};
+use std::{fs, io::Write, path::Path};
 
 #[derive(Deserialize)]
 pub struct RealmInfo {
@@ -181,8 +181,15 @@ pub async fn get_status(ods_socket_path: &str) -> Result<StatusResponse> {
 }
 
 pub fn create_frontend_config_file(keycloak_url: &str) -> Result<()> {
-    let mut config_file = std::fs::File::create(config_path!("app_config.js"))
-        .expect("failed to create frontend config file");
+    let config_path = config_path!("app_config.js");
+    let Some(parent) = config_path.parent() else {
+        bail!("failed to get parent directory for frontend config file")
+    };
+
+    fs::create_dir_all(parent).context("failed to create frontend config directory")?;
+
+    let mut config_file =
+        std::fs::File::create(config_path).expect("failed to create frontend config file");
 
     config_file
         .write_all(
