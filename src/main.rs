@@ -153,17 +153,6 @@ async fn main() {
 
     fs::exists("/data").expect("data dir /data is missing");
 
-    fn session_middleware() -> SessionMiddleware<CookieSessionStore> {
-        SessionMiddleware::builder(CookieSessionStore::default(), Key::generate())
-            .cookie_name(String::from("omnect-ui-session"))
-            .cookie_secure(true)
-            .session_lifecycle(BrowserSession::default())
-            .cookie_same_site(SameSite::Strict)
-            .cookie_content_security(CookieContentSecurity::Private)
-            .cookie_http_only(true)
-            .build()
-    }
-
     let centrifugo_client_token_hmac_secret_key = Uuid::new_v4().to_string();
     let centrifugo_http_api_key = Uuid::new_v4().to_string();
 
@@ -207,9 +196,20 @@ async fn main() {
         tenant,
     };
 
+    let session_key = Key::generate();
+
     let server = HttpServer::new(move || {
         App::new()
-            .wrap(session_middleware())
+            .wrap(
+                SessionMiddleware::builder(CookieSessionStore::default(), session_key.clone())
+                    .cookie_name(String::from("omnect-ui-session"))
+                    .cookie_secure(true)
+                    .session_lifecycle(BrowserSession::default())
+                    .cookie_same_site(SameSite::Strict)
+                    .cookie_content_security(CookieContentSecurity::Private)
+                    .cookie_http_only(true)
+                    .build(),
+            )
             .app_data(
                 MultipartFormConfig::default()
                     .total_limit(UPLOAD_LIMIT_BYTES)

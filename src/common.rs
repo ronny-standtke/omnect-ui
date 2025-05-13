@@ -189,7 +189,7 @@ pub fn create_frontend_config_file(keycloak_url: &str) -> Result<()> {
     fs::create_dir_all(parent).context("failed to create frontend config directory")?;
 
     let mut config_file =
-        std::fs::File::create(config_path).expect("failed to create frontend config file");
+        std::fs::File::create(config_path).context("failed to create frontend config file")?;
 
     config_file
         .write_all(
