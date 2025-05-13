@@ -5,7 +5,7 @@ import OmnectLogo from "../components/OmnectLogo.vue"
 import { useCentrifuge } from "../composables/useCentrifugo"
 
 const router = useRouter()
-const { initializeCentrifuge } = useCentrifuge()
+const { initializeCentrifuge, unsubscribeAll, disconnect } = useCentrifuge()
 const password = ref<string>("")
 const repeatPassword = ref<string>("")
 const visible = ref(false)
@@ -44,6 +44,9 @@ onMounted(async () => {
 		const requireSetPassword = await fetch("require-set-password")
 		if (requireSetPassword.status !== 201) {
 			router.push("/")
+		} else {
+			unsubscribeAll()
+			disconnect()
 		}
 	} catch {
 		router.push("/login")
