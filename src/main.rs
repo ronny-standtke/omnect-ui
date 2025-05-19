@@ -29,6 +29,8 @@ use tokio::{
 };
 use uuid::Uuid;
 
+pub const REQ_ODS_VERSION: &str = ">=0.39.0";
+
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
 
@@ -120,11 +122,22 @@ async fn main() {
         .parse::<u64>()
         .expect("UI_PORT format");
 
+    let ods_socket_path = std::env::var("SOCKET_PATH").expect("env SOCKET_PATH is missing");
+    fs::exists(&ods_socket_path).unwrap_or_else(|_| {
+        panic!(
+            "omnect device service socket file {} does not exist",
+            &ods_socket_path
+        )
+    });
+    let version_check_result = common::check_and_store_ods_version(&ods_socket_path)
+        .await
+        .expect("failed to check and store ods version");
+
     CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
 
     certificate::create_module_certificate(&cert_path!(), &key_path!())
         .await
-        .expect("Failed to create module certificate");
+        .expect("failed to create module certificate");
 
     let mut tls_certs =
         std::io::BufReader::new(std::fs::File::open(cert_path!()).expect("read certs_file"));
@@ -166,18 +179,10 @@ async fn main() {
         &centrifugo_http_server_port!(),
     );
 
-    let ods_socket_path = std::env::var("SOCKET_PATH").expect("env SOCKET_PATH is missing");
     let index_html =
         std::fs::canonicalize("static/index.html").expect("static/index.html not found");
 
     let tenant = std::env::var("TENANT").expect("env TENANT is missing");
-
-    fs::exists(&ods_socket_path).unwrap_or_else(|_| {
-        panic!(
-            "omnect device service socket file {} does not exist",
-            &ods_socket_path
-        )
-    });
 
     fs::exists(&update_os_path!())
         .unwrap_or_else(|_| panic!("path {} for os update does not exist", &update_os_path!()));
@@ -194,6 +199,7 @@ async fn main() {
         index_html,
         keycloak_public_key_url: keycloak_url!(),
         tenant,
+        version_check_result,
     };
 
     let session_key = Key::generate();

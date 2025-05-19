@@ -1859,7 +1859,7 @@ dependencies = [
 
 [[package]]
 name = "omnect-ui"
-version = "0.13.3"
+version = "0.14.0"
 dependencies = [
  "actix-files",
  "actix-http",
@@ -1883,6 +1883,7 @@ dependencies = [
  "reqwest",
  "rustls",
  "rustls-pemfile",
+ "semver",
  "serde",
  "serde_json",
  "serde_repr",

@@ -81,6 +81,13 @@ pub enum FactoryResetMode {
     Mode4 = 4,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct VersionCheckResult {
+    pub req_ods_version: String,
+    pub cur_ods_version: String,
+    pub version_mismatch: bool,
+}
+
 #[derive(Clone)]
 pub struct Api {
     pub ods_socket_path: String,
@@ -89,6 +96,7 @@ pub struct Api {
     pub index_html: PathBuf,
     pub keycloak_public_key_url: String,
     pub tenant: String,
+    pub version_check_result: VersionCheckResult,
 }
 
 impl Api {
@@ -111,9 +119,14 @@ impl Api {
         Ok(NamedFile::open(config_path!("app_config.js"))?)
     }
 
-    pub async fn healthcheck() -> impl Responder {
+    pub async fn healthcheck(config: web::Data<Api>) -> impl Responder {
         debug!("healthcheck() called");
-        HttpResponse::Ok().finish()
+
+        if config.version_check_result.version_mismatch {
+            HttpResponse::ServiceUnavailable().json(&config.version_check_result)
+        } else {
+            HttpResponse::Ok().json(&config.version_check_result)
+        }
     }
 
     pub async fn factory_reset(

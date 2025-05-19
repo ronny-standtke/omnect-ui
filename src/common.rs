@@ -1,9 +1,12 @@
+use crate::api::VersionCheckResult;
+use crate::REQ_ODS_VERSION;
 use actix_web::body::MessageBody;
 use anyhow::{anyhow, bail, Context, Result};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
 use reqwest::blocking::get;
+use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::{fs, io::Write, path::Path};
 
@@ -30,6 +33,7 @@ pub struct StatusResponse {
 #[derive(Deserialize)]
 pub struct SystemInfo {
     pub fleet_id: Option<String>,
+    omnect_device_service_version: String,
 }
 
 #[derive(Deserialize)]
@@ -198,4 +202,26 @@ pub fn create_frontend_config_file(keycloak_url: &str) -> Result<()> {
         .unwrap();
 
     Ok(())
+}
+
+pub async fn check_and_store_ods_version(ods_socket_path: &str) -> Result<VersionCheckResult> {
+    let status_response = get_status(ods_socket_path)
+        .await
+        .context("failed to get status from socket client")?;
+
+    let version_req = VersionReq::parse(REQ_ODS_VERSION)
+        .map_err(|e| anyhow!("failed to parse REQ_ODS_VERSION: {e}"))?;
+    let current_version =
+        Version::parse(&status_response.system_info.omnect_device_service_version)
+            .map_err(|e| anyhow!("failed to parse omnect_device_service_version: {e}"))?;
+    let version_mismatch = !version_req.matches(&current_version);
+
+    Ok(VersionCheckResult {
+        req_ods_version: REQ_ODS_VERSION.to_string(),
+        cur_ods_version: status_response
+            .system_info
+            .omnect_device_service_version
+            .clone(),
+        version_mismatch,
+    })
 }
