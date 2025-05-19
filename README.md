@@ -9,19 +9,21 @@ This module implements a web frontend and backend to provide omnect specific fea
 Since omnect-os is designed as generic OS, all specific or optional applications must be provided as docker images via azure iotedge deployment:
 
 - deployment of omnect-ui docker image via omnect-portal to a device in field
-- device must be online (at least once) in order to receive the deployment
+- device must be online (at least once) in order to receive the deployment and to set initial password
 - after a factory reset omnect-ui must be deployed again what requires a connection to azure cloud
 
 ## Access omnect-ui
 
 omnect-ui can be reached at <https://DeviceIp:1977><br>
 
-Login with the configured credentials<br>
+Login with the configured password<br>
 ![login](docu/login.png)<br>
 Watch device status<br>
 ![login](docu/main.png)<br>
 Reset device and choose options to keep<br>
-![factory-reset](docu/factory-reset.png)
+![factory-reset](docu/factory-reset.png)<br>
+Update your device<br>
+![update](docu/update.png)
 
 # License
 

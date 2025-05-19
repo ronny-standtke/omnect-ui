@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import axios from "axios"
-import { type Ref, computed, onMounted, ref } from "vue"
+import { type Ref, onMounted, ref } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useDisplay } from "vuetify"
 import BaseSideBar from "./components/BaseSideBar.vue"
+import DialogContent from "./components/DialogContent.vue"
 import OmnectLogo from "./components/OmnectLogo.vue"
 import OverlaySpinner from "./components/OverlaySpinner.vue"
 import UserMenu from "./components/UserMenu.vue"
@@ -22,43 +23,64 @@ const { lgAndUp } = useDisplay()
 const router = useRouter()
 const route = useRoute()
 const showSideBar: Ref<boolean> = ref(lgAndUp.value)
+const overlay: Ref<boolean> = ref(false)
+const errorTitle = ref("")
+const errorMsg = ref("")
 
 onConnected(() => {
-	reset()
-	router.push("/login")
+  reset()
+  router.push("/login")
 })
 
 const toggleSideBar = () => {
-	showSideBar.value = !showSideBar.value
+  showSideBar.value = !showSideBar.value
 }
 
 const updateSidebarVisibility = (visible: boolean) => {
-	showSideBar.value = visible
+  showSideBar.value = visible
 }
 
 onMounted(async () => {
-	initializeCentrifuge()
-})
+  initializeCentrifuge()
 
-const showBars = computed(() => {
-	return route.path !== "/login" && route.path !== "/set-password" && route.path !== "/auth-callback"
+  const res = await fetch("healthcheck", {
+    headers: {
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0"
+    }
+  })
+  const data = await res.json()
+  if (!res.ok) {
+    overlay.value = true
+    errorTitle.value = "omnect-device-service version mismatch"
+    errorMsg.value = `Current version: ${data.cur_ods_version}. Required version ${data.req_ods_version}. Please consider to update omnect Secure OS.`
+  }
 })
 </script>
 
 <template>
   <v-app>
+    <v-dialog v-model="overlay" max-width="50vw" :no-click-animation="true" persistent fullscreen>
+      <DialogContent :title="errorTitle" dialog-type="Error" :show-close="false">
+        <div class="flex flex-col gap-2 mb-8">
+          {{ errorMsg }}
+        </div>
+      </DialogContent>
+    </v-dialog>
     <v-app-bar flat :style="{ borderBottomWidth: '1px', borderColor: '#677680' }">
       <template #prepend>
         <v-icon class="hidden-lg-and-up mr-4 cursor-pointer text-primary" @click.stop="toggleSideBar">mdi-menu</v-icon>
         <OmnectLogo class="h-12"></OmnectLogo>
       </template>
-      <template v-if="showBars" #append>
+      <template v-if="route.meta.showMenu" #append>
         <div class="flex gap-x-4 mr-4 items-center">
           <UserMenu />
         </div>
       </template>
     </v-app-bar>
-    <BaseSideBar v-if="showBars" :showSideBar="showSideBar" @drawerVisibiltyChanged="updateSidebarVisibility">
+    <BaseSideBar v-if="route.meta.showMenu" :showSideBar="showSideBar"
+      @drawerVisibiltyChanged="updateSidebarVisibility">
     </BaseSideBar>
     <v-main>
       <RouterView></RouterView>
