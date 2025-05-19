@@ -135,6 +135,8 @@ fn unauthorized_error(req: ServiceRequest) -> ServiceResponse {
 
 #[cfg(test)]
 mod tests {
+    use crate::api::VersionCheckResult;
+
     use super::*;
 
     use actix_http::StatusCode;
@@ -290,6 +292,11 @@ mod tests {
             index_html: Path::new("/some/index/html/path").to_path_buf(),
             keycloak_public_key_url: "https://some/keycloak/public/key/url".to_string(),
             tenant: "cp".to_string(),
+            version_check_result: VersionCheckResult {
+                req_ods_version: ">0.39.0".to_string(),
+                cur_ods_version: "0.40.0".to_string(),
+                version_mismatch: false,
+            },
         };
 
         test::init_service(
