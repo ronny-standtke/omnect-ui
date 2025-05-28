@@ -1,13 +1,13 @@
 [package]
 authors = ["omnect@conplement.de"]
 description = "WebService providing access to omnect device features."
-edition = "2021"
+edition = "2024"
 homepage = "https://www.omnect.io/home"
 license = "MIT OR Apache-2.0"
 name = "omnect-ui"
 readme = "README.md"
 repository = "git@github.com:omnect/omnect-ui.git"
-version = "0.14.1"
+version = "0.14.2"
 build = "src/build.rs"
 
 [dependencies]
@@ -16,9 +16,9 @@ actix-multipart = { version = "0.7", default-features = false, features = [
   "tempfile",
   "derive"
 ]}
-actix-rt = { version = "2.10", default-features = false }
-actix-session = { version = "0.10.1", features = ["cookie-session"] }
-actix-web = { version = "4.9", default-features = false, features = [
+actix-session = { version = "0.10", features = ["cookie-session"] }
+actix-server = { version = "2.6", default-features = false }
+actix-web = { version = "4.11", default-features = false, features = [
   "macros",
   "rustls-0_23",
 ] }
@@ -28,16 +28,17 @@ argon2 = { version = "0.5", default-features = false, features = ["password-hash
 base64 = { version = "0.22", default-features = false }
 env_logger = { version = "0.11", default-features = false }
 http-body-util = { version = "0.1", default-features = false }
-hyper = { version = "1.3", default-features = false, features = [
+hyper = { version = "1.6", default-features = false, features = [
   "client",
   "http1",
 ] }
+hyperlocal = { version = "0.9", default-features = false, features = ["client"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 jwt-simple = { version = "0.12", default-features = false, features = [
   "optimal",
 ] }
 log = { version = "0.4", default-features = false }
-log-panics = { version = "2.0", default-features = false, features = [
+log-panics = { version = "2.1", default-features = false, features = [
   "with-backtrace",
 ] }
 rand_core = { version = "0.9", default-features = false, features = ["std"] }
@@ -56,12 +57,12 @@ serde_json = { version = "1.0", default-features = false, features = [
   "raw_value",
 ] }
 serde_repr = { version = "0.1", default-features = false }
-tokio = { version = "1.0", default-features = false, features = [
+tokio = { version = "1.45", default-features = false, features = [
   "macros",
   "net",
   "process",
 ] }
-uuid = { version = "1.16", default-features = false, features = [
+uuid = { version = "1.17", default-features = false, features = [
   "v4",
 ] }
 
@@ -69,7 +70,6 @@ uuid = { version = "1.16", default-features = false, features = [
 mock = []
 
 [dev-dependencies]
-actix-http = "3.10"
+actix-http = "3.11"
 actix-service = "2.0"
-base64 = "0.22.1"
-tempfile = "3.19.1"
+tempfile = "3.20.0"

@@ -1,41 +1,53 @@
-use crate::common::{config_path, validate_password, validate_token_and_claims};
-use crate::middleware::TOKEN_EXPIRE_HOURS;
-use crate::socket_client::*;
+use crate::{
+    certificate::create_module_certificate,
+    common::{centrifugo_config, config_path, validate_password},
+    keycloak_client,
+    middleware::TOKEN_EXPIRE_HOURS,
+    omnect_device_service_client::*,
+};
 use actix_files::NamedFile;
-use actix_multipart::form::{tempfile::TempFile, MultipartForm};
+use actix_multipart::form::{MultipartForm, tempfile::TempFile};
 use actix_session::Session;
-use actix_web::{web, HttpResponse, Responder};
-use anyhow::{anyhow, bail, Context, Result};
+use actix_web::{HttpResponse, Responder, web};
+use anyhow::{Context, Result, anyhow, bail};
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
     Argon2,
+    password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
 };
 use jwt_simple::prelude::*;
 use log::{debug, error};
 use serde::Deserialize;
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     fs::{self, File},
     io::Write,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 macro_rules! data_path {
-    ($filename:expr) => {{
+    ($filename:expr) => {
         Path::new("/data/").join($filename)
-    }};
+    };
+}
+
+macro_rules! host_data_path {
+    ($filename:expr) => {
+        Path::new(&format!("/var/lib/{}/", env!("CARGO_PKG_NAME"))).join($filename)
+    };
 }
 
 macro_rules! tmp_path {
-    ($filename:expr) => {{
+    ($filename:expr) => {
         Path::new("/tmp/").join($filename)
-    }};
+    };
 }
 
-#[derive(Deserialize)]
-pub struct FactoryResetInput {
-    preserve: Vec<String>,
+#[derive(Debug, Deserialize, Serialize)]
+struct TokenClaims {
+    roles: Option<Vec<String>>,
+    tenant_list: Option<Vec<String>>,
+    fleet_list: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -51,112 +63,87 @@ pub struct UpdatePasswordPayload {
     password: String,
 }
 
-#[derive(Serialize)]
-pub struct FactoryResetPayload {
-    mode: FactoryResetMode,
-    preserve: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct LoadUpdatePayload {
-    update_file_path: PathBuf,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct RunUpdatePayload {
-    validate_iothub_connection: bool,
-}
-
 #[derive(MultipartForm)]
 pub struct UploadFormSingleFile {
     file: TempFile,
 }
 
-#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
-#[repr(u8)]
-pub enum FactoryResetMode {
-    Mode1 = 1,
-    Mode2 = 2,
-    Mode3 = 3,
-    Mode4 = 4,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct VersionCheckResult {
-    pub req_ods_version: String,
-    pub cur_ods_version: String,
-    pub version_mismatch: bool,
-}
-
 #[derive(Clone)]
 pub struct Api {
-    pub ods_socket_path: String,
-    pub update_os_path: String,
-    pub centrifugo_client_token_hmac_secret_key: String,
+    pub ods_client: Arc<OmnectDeviceServiceClient>,
     pub index_html: PathBuf,
-    pub keycloak_public_key_url: String,
     pub tenant: String,
-    pub version_check_result: VersionCheckResult,
 }
 
 impl Api {
-    pub async fn index(config: web::Data<Api>) -> actix_web::Result<NamedFile> {
+    const UPDATE_FILE_NAME: &str = "update.tar";
+    pub async fn new() -> Result<Self> {
+        let index_html =
+            std::fs::canonicalize("static/index.html").context("static/index.html not found")?;
+        let tenant = std::env::var("TENANT").unwrap_or("cp".to_string());
+        let ods_client = Arc::new(OmnectDeviceServiceClient::new().await?);
+
+        create_module_certificate(&ods_client)
+            .await
+            .expect("failed to create module certificate");
+
+        Ok(Api {
+            ods_client,
+            index_html,
+            tenant,
+        })
+    }
+
+    pub async fn index(api: web::Data<Api>) -> actix_web::Result<NamedFile> {
         debug!("index() called");
 
-        static ENDPOINT: &str = concat!("/republish/v1/", env!("CARGO_PKG_NAME"));
-
-        if let Err(e) = post_with_empty_body(ENDPOINT, &config.ods_socket_path).await {
+        if let Err(e) = api.ods_client.republish().await {
             error!("republish failed: {e:#}");
             return Err(actix_web::error::ErrorInternalServerError(
                 "republish failed",
             ));
         }
 
-        Ok(NamedFile::open(&config.index_html)?)
+        Ok(NamedFile::open(&api.index_html)?)
     }
 
     pub async fn config() -> actix_web::Result<NamedFile> {
         Ok(NamedFile::open(config_path!("app_config.js"))?)
     }
 
-    pub async fn healthcheck(config: web::Data<Api>) -> impl Responder {
+    pub async fn healthcheck(api: web::Data<Api>) -> impl Responder {
         debug!("healthcheck() called");
 
-        if config.version_check_result.version_mismatch {
-            HttpResponse::ServiceUnavailable().json(&config.version_check_result)
-        } else {
-            HttpResponse::Ok().json(&config.version_check_result)
-        }
-    }
-
-    pub async fn factory_reset(
-        body: web::Json<FactoryResetInput>,
-        config: web::Data<Api>,
-    ) -> impl Responder {
-        debug!(
-            "factory_reset() called with preserved keys {}",
-            body.preserve.join(",")
-        );
-
-        let payload = FactoryResetPayload {
-            mode: FactoryResetMode::Mode1,
-            preserve: body.preserve.clone(),
-        };
-
-        match post_with_json_body("/factory-reset/v1", payload, &config.ods_socket_path).await {
-            Ok(response) => response,
+        match api.ods_client.version_info().await {
+            Ok(info) if info.mismatch => HttpResponse::ServiceUnavailable().json(&info),
+            Ok(info) => HttpResponse::Ok().json(&info),
             Err(e) => {
-                error!("factory_reset failed: {e:#}");
+                error!("healthcheck: {e:#}");
                 HttpResponse::InternalServerError().body(format!("{e}"))
             }
         }
     }
 
-    pub async fn reboot(config: web::Data<Api>) -> impl Responder {
+    pub async fn factory_reset(
+        body: web::Json<FactoryReset>,
+        api: web::Data<Api>,
+    ) -> impl Responder {
+        debug!("factory_reset() called: {body:?}");
+
+        match api.ods_client.factory_reset(body.into_inner()).await {
+            Ok(_) => HttpResponse::Ok().finish(),
+            Err(e) => {
+                error!("factory_reset: {e:#}");
+                HttpResponse::InternalServerError().body(format!("{e}"))
+            }
+        }
+    }
+
+    pub async fn reboot(api: web::Data<Api>) -> impl Responder {
         debug!("reboot() called");
 
-        match post_with_empty_body("/reboot/v1", &config.ods_socket_path).await {
-            Ok(response) => response,
+        match api.ods_client.reboot().await {
+            Ok(_) => HttpResponse::Ok().finish(),
             Err(e) => {
                 error!("reboot failed: {e:#}");
                 HttpResponse::InternalServerError().body(format!("{e}"))
@@ -164,32 +151,28 @@ impl Api {
         }
     }
 
-    pub async fn reload_network(config: web::Data<Api>) -> impl Responder {
+    pub async fn reload_network(api: web::Data<Api>) -> impl Responder {
         debug!("reload_network() called");
 
-        match post_with_empty_body("/reload-network/v1", &config.ods_socket_path).await {
-            Ok(response) => response,
+        match api.ods_client.reload_network().await {
+            Ok(_) => HttpResponse::Ok().finish(),
             Err(e) => {
-                error!("reload-network failed: {e:#}");
+                error!("reload_network failed: {e:#}");
                 HttpResponse::InternalServerError().body(format!("{e}"))
             }
         }
     }
 
-    pub async fn token(session: Session, config: web::Data<Api>) -> impl Responder {
-        match Api::set_session_token(session, config) {
-            Ok(token) => HttpResponse::Ok().body(token),
-            Err(e) => {
-                error!("token() failed: {e:#}");
-                HttpResponse::InternalServerError().body(format!("{e}"))
-            }
-        }
+    pub async fn token(session: Session) -> impl Responder {
+        debug!("token() called");
+
+        Api::session_token(session)
     }
 
     pub async fn logout(session: Session) -> impl Responder {
         debug!("logout() called");
         session.purge();
-        HttpResponse::Ok()
+        HttpResponse::Ok().finish()
     }
 
     pub async fn version() -> impl Responder {
@@ -207,14 +190,11 @@ impl Api {
 
         let _ = Api::clear_data_folder();
 
-        if let Err(e) =
-            Api::persist_uploaded_file(form.file, &tmp_path!(&filename), &data_path!(&filename))
-        {
-            error!("save_file() failed: {e:#}");
-            return HttpResponse::InternalServerError().body(format!("{e}"));
-        }
-
-        if let Err(e) = Api::set_file_permission(&data_path!(&filename)) {
+        if let Err(e) = Api::persist_uploaded_file(
+            form.file,
+            &tmp_path!(&filename),
+            &data_path!(&Api::UPDATE_FILE_NAME),
+        ) {
             error!("save_file() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{e}"));
         }
@@ -222,16 +202,19 @@ impl Api {
         HttpResponse::Ok().finish()
     }
 
-    pub async fn load_update(
-        mut body: web::Json<LoadUpdatePayload>,
-        config: web::Data<Api>,
-    ) -> impl Responder {
-        debug!("load_update() called with path {:?}", body.update_file_path);
+    pub async fn load_update(api: web::Data<Api>) -> impl Responder {
+        debug!("load_update() called with path");
 
-        body.update_file_path = Path::new(&config.update_os_path).join(&body.update_file_path);
-
-        match post_with_json_body("/fwupdate/load/v1", body, &config.ods_socket_path).await {
-            Ok(response) => response,
+        match api
+            .ods_client
+            .load_update(LoadUpdate {
+                update_file_path: host_data_path!(&Api::UPDATE_FILE_NAME)
+                    .display()
+                    .to_string(),
+            })
+            .await
+        {
+            Ok(data) => HttpResponse::Ok().body(data),
             Err(e) => {
                 error!("load_update failed: {e:#}");
                 HttpResponse::InternalServerError().body(format!("{e}"))
@@ -239,17 +222,11 @@ impl Api {
         }
     }
 
-    pub async fn run_update(
-        body: web::Json<RunUpdatePayload>,
-        config: web::Data<Api>,
-    ) -> impl Responder {
-        debug!(
-            "run_update() called with validate_iothub_connection: {}",
-            body.validate_iothub_connection
-        );
+    pub async fn run_update(body: web::Json<RunUpdate>, api: web::Data<Api>) -> impl Responder {
+        debug!("run_update() called with validate_iothub_connection: {body:?}");
 
-        match post_with_json_body("/fwupdate/run/v1", body, &config.ods_socket_path).await {
-            Ok(response) => response,
+        match api.ods_client.run_update(body.into_inner()).await {
+            Ok(_) => HttpResponse::Ok().finish(),
             Err(e) => {
                 error!("run_update failed: {e:#}");
                 HttpResponse::InternalServerError().body(format!("{e}"))
@@ -260,11 +237,10 @@ impl Api {
     pub async fn set_password(
         body: web::Json<SetPasswordPayload>,
         session: Session,
-        config: web::Data<Api>,
     ) -> impl Responder {
         debug!("set_password() called");
 
-        if !Api::set_password_necessary() {
+        if config_path!("password").exists() {
             return HttpResponse::Found()
                 .append_header(("Location", "/login"))
                 .finish();
@@ -275,13 +251,7 @@ impl Api {
             return HttpResponse::InternalServerError().body(format!("{:#}", e));
         }
 
-        match Api::set_session_token(session, config) {
-            Ok(token) => HttpResponse::Ok().body(token),
-            Err(e) => {
-                error!("token() failed: {e:#}");
-                HttpResponse::InternalServerError().body(format!("{e}"))
-            }
-        }
+        Api::session_token(session)
     }
 
     pub async fn update_password(
@@ -307,7 +277,7 @@ impl Api {
     pub async fn require_set_password() -> impl Responder {
         debug!("require_set_password() called");
 
-        if Api::set_password_necessary() {
+        if !config_path!("password").exists() {
             return HttpResponse::Created()
                 .append_header(("Location", "/set-password"))
                 .finish();
@@ -316,21 +286,59 @@ impl Api {
         HttpResponse::Ok().finish()
     }
 
-    pub async fn validate_portal_token(body: String, config: web::Data<Api>) -> impl Responder {
+    pub async fn validate_portal_token(body: String, api: web::Data<Api>) -> impl Responder {
         debug!("validate_portal_token() called");
 
-        if let Err(e) = validate_token_and_claims(
-            &body,
-            &config.keycloak_public_key_url,
-            &config.tenant,
-            &config.ods_socket_path,
-        )
-        .await
-        {
+        if let Err(e) = api.validate_token_and_claims(&body).await {
             error!("validate_portal_token() failed: {e:#}");
             return HttpResponse::Unauthorized().finish();
         }
         HttpResponse::Ok().finish()
+    }
+
+    async fn validate_token_and_claims(&self, token: &str) -> Result<()> {
+        let pub_key = keycloak_client::realm_public_key()
+            .await
+            .context("failed to get public key")?;
+
+        let claims = pub_key
+            .verify_token::<TokenClaims>(token, None)
+            .context("failed to verify token")?;
+
+        let Some(tenant_list) = &claims.custom.tenant_list else {
+            bail!("user has no tenant list");
+        };
+
+        if !tenant_list.contains(&self.tenant) {
+            bail!("user has no permission to set password");
+        }
+
+        let Some(roles) = &claims.custom.roles else {
+            bail!("user has no roles");
+        };
+
+        if roles.contains(&String::from("FleetAdministrator")) {
+            return Ok(());
+        }
+
+        if roles.contains(&String::from("FleetOperator")) {
+            let Some(fleet_list) = &claims.custom.fleet_list else {
+                bail!("user has no permission on this fleet");
+            };
+
+            let fleet_id = self
+                .ods_client
+                .fleet_id()
+                .await
+                .context("failed to get fleet id")?;
+
+            if !fleet_list.contains(&fleet_id) {
+                bail!("user has no permission on this fleet");
+            }
+            return Ok(());
+        }
+
+        bail!("user has no permission to set password")
     }
 
     fn clear_data_folder() -> Result<()> {
@@ -355,24 +363,10 @@ impl Api {
 
         fs::copy(temp_path, data_path).context("failed to copy file to data dir")?;
 
-        Ok(())
-    }
-
-    fn set_file_permission(file_path: &Path) -> Result<()> {
-        debug!("set_file_permission() called");
-
-        let metadata = fs::metadata(file_path).context("failed to get file metadata")?;
+        let metadata = fs::metadata(data_path).context("failed to get file metadata")?;
         let mut perm = metadata.permissions();
         perm.set_mode(0o750);
-        fs::set_permissions(file_path, perm).context("failed to set file permission")?;
-
-        Ok(())
-    }
-
-    fn set_password_necessary() -> bool {
-        debug!("set_password_necessary() called");
-        let password_file = config_path!("password");
-        !password_file.exists()
+        fs::set_permissions(data_path, perm).context("failed to set file permission")
     }
 
     fn hash_password(password: &str) -> Result<String> {
@@ -391,15 +385,6 @@ impl Api {
         debug!("store_or_update_password() called");
 
         let password_file = config_path!("password");
-
-        if Api::set_password_necessary() {
-            let Some(parent) = password_file.parent() else {
-                bail!("failed to get parent directory for password file")
-            };
-
-            fs::create_dir_all(parent).context("failed to create password directory")?;
-        }
-
         let hash = Api::hash_password(password)?;
         let mut file = File::create(&password_file).context("failed to create password file")?;
 
@@ -407,17 +392,21 @@ impl Api {
             .context("failed to write password file")
     }
 
-    fn set_session_token(session: Session, config: web::Data<Api>) -> Result<String> {
-        let key = HS256Key::from_bytes(config.centrifugo_client_token_hmac_secret_key.as_bytes());
+    fn session_token(session: Session) -> HttpResponse {
+        let key = HS256Key::from_bytes(centrifugo_config().client_token.as_bytes());
         let claims =
             Claims::create(Duration::from_hours(TOKEN_EXPIRE_HOURS)).with_subject("omnect-ui");
 
-        let token = key.authenticate(claims).context("failed to create token")?;
+        let Ok(token) = key.authenticate(claims) else {
+            error!("failed to create token");
+            return HttpResponse::InternalServerError().body("failed to create token");
+        };
 
-        let _ = session
-            .insert("token", &token)
-            .context("failed to insert token into session");
+        if session.insert("token", &token).is_err() {
+            error!("failed to insert token into session");
+            return HttpResponse::InternalServerError().body("failed to insert token into session");
+        }
 
-        Ok(token)
+        HttpResponse::Ok().body(token)
     }
 }

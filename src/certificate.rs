@@ -1,7 +1,6 @@
-use crate::{common, socket_client};
-use actix_web::body::MessageBody;
-use anyhow::{anyhow, Context, Result};
-use log::{debug, info};
+use crate::{omnect_device_service_client::OmnectDeviceServiceClient, socket_client::SocketClient};
+use anyhow::{Context, Result};
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::Write};
 
@@ -28,65 +27,54 @@ struct CreateCertResponse {
     expiration: String,
 }
 
+pub fn cert_path() -> String {
+    std::env::var("CERT_PATH").unwrap_or("/cert/cert.pem".to_string())
+}
+
+pub fn key_path() -> String {
+    std::env::var("KEY_PATH").unwrap_or("/cert/key.pem".to_string())
+}
+
 #[cfg(feature = "mock")]
-pub async fn create_module_certificate(_cert_path: &str, _key_path: &str) -> Result<()> {
+pub async fn create_module_certificate(_ods_client: &OmnectDeviceServiceClient) -> Result<()> {
     Ok(())
 }
 
 #[cfg(not(feature = "mock"))]
-pub async fn create_module_certificate(cert_path: &str, key_path: &str) -> Result<()> {
+pub async fn create_module_certificate(ods_client: &OmnectDeviceServiceClient) -> Result<()> {
     info!("create module certificate");
 
-    let iotedge_moduleid = std::env::var("IOTEDGE_MODULEID").context("IOTEDGE_MODULEID missing")?;
-    let iotedge_modulegenerationid = std::env::var("IOTEDGE_MODULEGENERATIONID")
+    let moduleid = std::env::var("IOTEDGE_MODULEID").context("IOTEDGE_MODULEID missing")?;
+    let modulegenerationid = std::env::var("IOTEDGE_MODULEGENERATIONID")
         .context("IOTEDGE_MODULEGENERATIONID missing")?;
-    let iotedge_apiversion =
-        std::env::var("IOTEDGE_APIVERSION").context("IOTEDGE_APIVERSION missing")?;
-    let iotedge_workloaduri =
+    let apiversion = std::env::var("IOTEDGE_APIVERSION").context("IOTEDGE_APIVERSION missing")?;
+    let workloaduri =
         std::env::var("IOTEDGE_WORKLOADURI").context("IOTEDGE_WORKLOADURI missing")?;
-
-    let ods_socket_path = std::env::var("SOCKET_PATH").context("env SOCKET_PATH is missing")?;
-    let ip = get_ip_address(&ods_socket_path).await?;
-    debug!("IP address: {}", ip);
-
-    let payload = CreateCertPayload { common_name: ip };
-    let path = format!("/modules/{iotedge_moduleid}/genid/{iotedge_modulegenerationid}/certificate/server?api-version={iotedge_apiversion}");
-    let socket_path = iotedge_workloaduri
-        .strip_prefix("unix://")
-        .context("failed to strip socket path")?;
-
-    let response = socket_client::post_with_json_body(&path, payload, socket_path)
+    let payload = CreateCertPayload {
+        common_name: ods_client.ip_address().await?,
+    };
+    let path = format!(
+        "/modules/{moduleid}/genid/{modulegenerationid}/certificate/server?api-version={apiversion}"
+    );
+    let uri = hyperlocal::Uri::new(
+        workloaduri
+            .strip_prefix("unix://")
+            .context("unexpected workload uri prefix")?,
+        &path,
+    )
+    .into();
+    let socket_client = SocketClient::new();
+    let response = socket_client
+        .post_with_json_body(&uri, payload)
         .await
         .context("create_module_certificate request failed")?;
-
-    let cert_response: CreateCertResponse = serde_json::from_slice(
-        &response
-            .into_body()
-            .try_into_bytes()
-            .map_err(|e| anyhow!("Failed to convert response body into bytes: {e:?}"))?,
-    )
-    .context("CreateCertResponse not possible")?;
-
-    let mut file = File::create(cert_path).context("could not be create cert_path")?;
+    let cert_response: CreateCertResponse =
+        serde_json::from_str(&response).context("CreateCertResponse not possible")?;
+    let mut file = File::create(cert_path()).context("could not be create cert_path")?;
     file.write_all(cert_response.certificate.as_bytes())
         .context("could not write to cert_path")?;
 
-    let mut file = File::create(key_path).context("could not be create key_path")?;
+    let mut file = File::create(key_path()).context("could not be create key_path")?;
     file.write_all(cert_response.private_key.bytes.as_bytes())
         .context("could not write to key_path")
-}
-
-async fn get_ip_address(ods_socket_path: &str) -> Result<String> {
-    let status_response = common::get_status(ods_socket_path)
-        .await
-        .context("Failed to get status from socket client")?;
-
-    status_response
-        .network_status
-        .network_interfaces
-        .into_iter()
-        .find(|iface| iface.online)
-        .and_then(|iface| iface.ipv4.addrs.into_iter().next())
-        .map(|addr_info| addr_info.addr)
-        .ok_or_else(|| anyhow!("No online network interface with IPv4 address found"))
 }

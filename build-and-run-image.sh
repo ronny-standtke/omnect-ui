@@ -2,7 +2,7 @@
 
 # local build and run
 omnect_ui_version=$(toml get --raw Cargo.toml package.version)
-rust_version="1.84.1-bookworm"
+rust_version="1.87.0-bookworm"
 omnect_ui_port="1977"
 centrifugo_port="8000"
 
