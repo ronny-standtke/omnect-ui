@@ -1,22 +1,19 @@
+use crate::common::{centrifugo_config, validate_password};
 use actix_session::SessionExt;
 use actix_web::{
-    body::EitherBody,
-    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    web::Data,
     Error, FromRequest, HttpMessage, HttpResponse,
+    body::EitherBody,
+    dev::{Service, ServiceRequest, ServiceResponse, Transform, forward_ready},
 };
 use actix_web_httpauth::extractors::basic::BasicAuth;
 use anyhow::Result;
 use jwt_simple::prelude::*;
 use log::error;
 use std::{
-    future::{ready, Future, Ready},
+    future::{Future, Ready, ready},
     pin::Pin,
     rc::Rc,
 };
-
-use crate::api::Api;
-use crate::common::validate_password;
 
 pub const TOKEN_EXPIRE_HOURS: u64 = 2;
 
@@ -63,12 +60,6 @@ where
         let service = self.service.clone();
 
         Box::pin(async move {
-            let Some(api_config) = req.app_data::<Data<Api>>() else {
-                let http_res = HttpResponse::InternalServerError().finish();
-                let (http_req, _) = req.into_parts();
-                return Ok(ServiceResponse::new(http_req, http_res).map_into_right_body());
-            };
-
             let token = match req.get_session().get::<String>("token") {
                 Ok(token) => token.unwrap_or_default(),
                 Err(e) => {
@@ -77,31 +68,30 @@ where
                 }
             };
 
-            if !token.is_empty()
-                && verify_token(&token, &api_config.centrifugo_client_token_hmac_secret_key)
-            {
+            if verify_token(&token) {
                 let res = service.call(req).await?;
-                Ok(res.map_into_left_body())
-            } else {
-                let mut payload = req.take_payload().take();
-
-                let Ok(auth) = BasicAuth::from_request(req.request(), &mut payload).await else {
-                    return Ok(unauthorized_error(req).map_into_right_body());
-                };
-
-                if verify_user(auth) {
-                    let res = service.call(req).await?;
-                    Ok(res.map_into_left_body())
-                } else {
-                    Ok(unauthorized_error(req).map_into_right_body())
-                }
+                return Ok(res.map_into_left_body());
             }
+
+            let mut payload = req.take_payload().take();
+
+            let Ok(auth) = BasicAuth::from_request(req.request(), &mut payload).await else {
+                return Ok(unauthorized_error(req).map_into_right_body());
+            };
+
+            let true = verify_user(auth) else {
+                return Ok(unauthorized_error(req).map_into_right_body());
+            };
+
+            let res = service.call(req).await?;
+
+            Ok(res.map_into_left_body())
         })
     }
 }
 
-pub fn verify_token(token: &str, centrifugo_client_token_hmac_secret_key: &str) -> bool {
-    let key = HS256Key::from_bytes(centrifugo_client_token_hmac_secret_key.as_bytes());
+pub fn verify_token(token: &str) -> bool {
+    let key = HS256Key::from_bytes(centrifugo_config().client_token.as_bytes());
     let options = VerificationOptions {
         accept_future: true,
         time_tolerance: Some(Duration::from_mins(15)),
@@ -134,41 +124,30 @@ fn unauthorized_error(req: ServiceRequest) -> ServiceResponse {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::api::VersionCheckResult;
-
+pub mod tests {
     use super::*;
-
+    use crate::common;
     use actix_http::StatusCode;
-    use argon2::{
-        password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
-        Argon2,
-    };
-
-    use std::{collections::HashMap, fs::File, io::Write, path::Path};
-
     use actix_session::{
+        SessionMiddleware,
         config::{BrowserSession, CookieContentSecurity},
         storage::{CookieSessionStore, SessionStore},
-        SessionMiddleware,
     };
     use actix_web::{
+        App, HttpResponse, Responder,
         cookie::{Cookie, CookieJar, Key, SameSite},
         dev::ServiceResponse,
         http::header::ContentType,
-        test, web, App, HttpResponse, Responder,
+        test, web,
     };
     use actix_web_httpauth::headers::authorization::Basic;
-
+    use argon2::{
+        Argon2,
+        password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
+    };
     use base64::prelude::*;
-
     use jwt_simple::claims::{JWTClaims, NoCustomClaims};
-    use uuid::Uuid;
-
-    fn generate_hs256_key() -> HS256Key {
-        let key_str = Uuid::new_v4().to_string();
-        HS256Key::from_bytes(key_str.as_bytes())
-    }
+    use std::{collections::HashMap, fs::File, io::Write};
 
     fn generate_valid_claim() -> JWTClaims<NoCustomClaims> {
         let issued_at = Clock::now_since_epoch();
@@ -249,11 +228,9 @@ mod tests {
         }
     }
 
-    fn generate_token_and_key(claim: JWTClaims<NoCustomClaims>) -> (String, String) {
-        let key = generate_hs256_key();
-        let token = key.authenticate(claim).unwrap();
-
-        (token, String::from_utf8(key.to_bytes()).unwrap())
+    fn generate_token(claim: JWTClaims<NoCustomClaims>) -> String {
+        let key = HS256Key::from_bytes(common::centrifugo_config().client_token.as_bytes());
+        key.authenticate(claim).unwrap()
     }
 
     async fn index() -> impl Responder {
@@ -268,9 +245,7 @@ mod tests {
         0x8, 0x15, 0xc9, 0xe0,
     ];
 
-    async fn create_service(
-        session_secret: &str,
-    ) -> impl actix_service::Service<
+    async fn create_service() -> impl actix_service::Service<
         actix_http::Request,
         Response = ServiceResponse,
         Error = actix_web::Error,
@@ -285,24 +260,9 @@ mod tests {
             .cookie_http_only(true)
             .build();
 
-        let api_config = Api {
-            ods_socket_path: "/some/socket/path".to_string(),
-            update_os_path: "/some/update/os/path".to_string(),
-            centrifugo_client_token_hmac_secret_key: session_secret.to_string(),
-            index_html: Path::new("/some/index/html/path").to_path_buf(),
-            keycloak_public_key_url: "https://some/keycloak/public/key/url".to_string(),
-            tenant: "cp".to_string(),
-            version_check_result: VersionCheckResult {
-                req_ods_version: ">0.39.0".to_string(),
-                cur_ods_version: "0.40.0".to_string(),
-                version_mismatch: false,
-            },
-        };
-
         test::init_service(
             App::new()
                 .wrap(session_middleware)
-                .app_data(Data::new(api_config.clone()))
                 .route("/", web::get().to(index).wrap(AuthMw)),
         )
         .await
@@ -340,9 +300,9 @@ mod tests {
     #[tokio::test]
     async fn middleware_correct_token_should_succeed() {
         let claim = generate_valid_claim();
-        let (token, session_secret) = generate_token_and_key(claim);
+        let token = generate_token(claim);
 
-        let app = create_service(&session_secret).await;
+        let app = create_service().await;
         let cookie = create_cookie_for_token(&token).await;
 
         let req = test::TestRequest::default()
@@ -357,9 +317,9 @@ mod tests {
     #[tokio::test]
     async fn middleware_expired_token_should_require_login() {
         let claim = generate_expired_claim();
-        let (token, session_secret) = generate_token_and_key(claim);
+        let token = generate_token(claim);
 
-        let app = create_service(&session_secret).await;
+        let app = create_service().await;
         let cookie = create_cookie_for_token(&token).await;
 
         let req = test::TestRequest::default()
@@ -374,9 +334,9 @@ mod tests {
     #[tokio::test]
     async fn middleware_token_with_invalid_subject_should_require_login() {
         let claim = generate_invalid_subject_claim();
-        let (token, session_secret) = generate_token_and_key(claim);
+        let token = generate_token(claim);
 
-        let app = create_service(&session_secret).await;
+        let app = create_service().await;
         let cookie = create_cookie_for_token(&token).await;
 
         let req = test::TestRequest::default()
@@ -388,9 +348,9 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
         let claim = generate_unset_subject_claim();
-        let (token, session_secret) = generate_token_and_key(claim);
+        let token = generate_token(claim);
 
-        let app = create_service(&session_secret).await;
+        let app = create_service().await;
         let cookie = create_cookie_for_token(&token).await;
 
         let req = test::TestRequest::default()
@@ -405,10 +365,10 @@ mod tests {
     #[tokio::test]
     async fn middleware_invalid_token_should_require_login() {
         let claim = generate_unset_subject_claim();
-        let (_, session_secret) = generate_token_and_key(claim);
+        let _ = generate_token(claim);
         let token = "someinvalidtestbytes".to_string();
 
-        let app = create_service(&session_secret).await;
+        let app = create_service().await;
         let cookie = create_cookie_for_token(&token).await;
 
         let req = test::TestRequest::default()
@@ -436,13 +396,12 @@ mod tests {
 
     #[tokio::test]
     async fn middleware_correct_user_credentials_should_succeed_and_return_valid_token() {
-        let session_secret = generate_hs256_key();
-
-        let app = create_service(&String::from_utf8(session_secret.to_bytes()).unwrap()).await;
+        let app = create_service().await;
 
         let password = "some-password";
         let config_path = create_password_file(password);
-        std::env::set_var("CONFIG_PATH", config_path.path());
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("CONFIG_PATH", config_path.path()) };
 
         let encoded_password = BASE64_STANDARD.encode(format!(":{password}"));
 
@@ -458,13 +417,12 @@ mod tests {
 
     #[tokio::test]
     async fn middleware_invalid_user_credentials_should_return_unauthorized_error() {
-        let session_secret = generate_hs256_key();
-
-        let app = create_service(&String::from_utf8(session_secret.to_bytes()).unwrap()).await;
+        let app = create_service().await;
 
         let password = "some-password";
         let config_path = create_password_file(password);
-        std::env::set_var("CONFIG_PATH", config_path.path());
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("CONFIG_PATH", config_path.path()) };
 
         let encoded_password = BASE64_STANDARD.encode(":some-other-password");
 
@@ -480,39 +438,39 @@ mod tests {
     #[tokio::test]
     async fn verify_correct_token_should_succeed() {
         let claim = generate_valid_claim();
-        let (token, key) = generate_token_and_key(claim);
+        let token = generate_token(claim);
 
-        assert!(verify_token(token.as_str(), &key));
+        assert!(verify_token(token.as_str()));
     }
 
     #[tokio::test]
     async fn verify_expired_token_should_fail() {
         let claim = generate_expired_claim();
-        let (token, key) = generate_token_and_key(claim);
+        let token = generate_token(claim);
 
-        assert!(!verify_token(token.as_str(), &key));
+        assert!(!verify_token(token.as_str()));
     }
 
     #[tokio::test]
     async fn verify_token_with_invalid_subject_should_fail() {
         let claim = generate_unset_subject_claim();
-        let (token, key) = generate_token_and_key(claim);
+        let token = generate_token(claim);
 
-        assert!(!verify_token(token.as_str(), &key));
+        assert!(!verify_token(token.as_str()));
 
         let claim = generate_invalid_subject_claim();
-        let (token, key) = generate_token_and_key(claim);
+        let token = generate_token(claim);
 
-        assert!(!verify_token(token.as_str(), &key));
+        assert!(!verify_token(token.as_str()));
     }
 
     #[tokio::test]
     async fn verify_token_with_invalid_token_should_fail() {
         let claim = generate_invalid_subject_claim();
-        let (_, key) = generate_token_and_key(claim);
+        let _ = generate_token(claim);
         let token = "someinvalidtestbytes".to_string();
 
-        assert!(!verify_token(token.as_str(), &key));
+        assert!(!verify_token(token.as_str()));
     }
 
     #[tokio::test]
