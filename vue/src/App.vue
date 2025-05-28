@@ -54,7 +54,7 @@ onMounted(async () => {
   if (!res.ok) {
     overlay.value = true
     errorTitle.value = "omnect-device-service version mismatch"
-    errorMsg.value = `Current version: ${data.current}. Required version ${data.required}. Please consider to update omnect Secure OS.`
+    errorMsg.value = `Current version: ${data.cur_ods_version}. Required version ${data.req_ods_version}. Please consider to update omnect Secure OS.`
   }
 })
 </script>

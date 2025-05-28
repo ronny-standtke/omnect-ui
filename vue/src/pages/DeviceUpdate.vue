@@ -13,6 +13,9 @@ const { showError } = useSnackbar()
 const { history, onConnected } = useCentrifuge()
 
 const currentVersion = ref<string>()
+const loadUpdatePayload = ref({
+	update_file_path: ""
+})
 
 const {
 	onFetchError: onLoadUpdateError,
@@ -22,7 +25,7 @@ const {
 	isFetching: loadUpdateFetching,
 	response,
 	data
-} = useFetch("update/load", { immediate: false }).post().json()
+} = useFetch("update/load", { immediate: false }).post(loadUpdatePayload).json()
 
 onLoadUpdateError(async () => {
 	if (loadUpdateStatusCode.value === 401) {
@@ -32,7 +35,10 @@ onLoadUpdateError(async () => {
 	}
 })
 
-const loadUpdateData = () => {
+const loadUpdateData = (filename: string) => {
+	loadUpdatePayload.value = {
+		update_file_path: filename
+	}
 	loadUpdate(false)
 }
 

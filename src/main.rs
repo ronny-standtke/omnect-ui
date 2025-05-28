@@ -1,38 +1,93 @@
 mod api;
 mod certificate;
 mod common;
-mod keycloak_client;
 mod middleware;
-mod omnect_device_service_client;
 mod socket_client;
 
 use crate::api::Api;
 use actix_files::Files;
 use actix_multipart::form::MultipartFormConfig;
-use actix_server::ServerHandle;
 use actix_session::{
-    SessionMiddleware,
     config::{BrowserSession, CookieContentSecurity},
     storage::CookieSessionStore,
+    SessionMiddleware,
 };
 use actix_web::{
-    App, HttpServer,
     cookie::{Key, SameSite},
     web::{self, Data},
+    App, HttpResponse, HttpServer, Responder,
 };
 use anyhow::Result;
-use common::{centrifugo_config, config_path};
 use env_logger::{Builder, Env, Target};
-use log::{debug, info};
-use rustls::crypto::{CryptoProvider, ring::default_provider};
+use log::{debug, error, info};
+use rustls::crypto::{ring::default_provider, CryptoProvider};
+use serde::Serialize;
 use std::{fs, io::Write};
 use tokio::{
-    process::{Child, Command},
-    signal::unix::{SignalKind, signal},
+    process::Command,
+    signal::unix::{signal, SignalKind},
 };
+use uuid::Uuid;
+
+pub const REQ_ODS_VERSION: &str = ">=0.39.0";
 
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
+
+macro_rules! update_os_path {
+    () => {{
+        static DATA_DIR_PATH_DEFAULT: &'static str = "/var/lib/omnect-ui";
+        std::env::var("DATA_DIR_PATH").unwrap_or(DATA_DIR_PATH_DEFAULT.to_string())
+    }};
+}
+
+macro_rules! centrifugo_http_server_port {
+    () => {{
+        static CENTRIFUGO_HTTP_SERVER_PORT_DEFAULT: &'static str = "8000";
+        std::env::var("CENTRIFUGO_HTTP_SERVER_PORT")
+            .unwrap_or(CENTRIFUGO_HTTP_SERVER_PORT_DEFAULT.to_string())
+    }};
+}
+
+macro_rules! keycloak_url {
+    () => {{
+        static KEYCLOAK_URL: &'static str =
+            "https://keycloak.omnect.conplement.cloud/realms/cp-prod";
+        std::env::var("KEYCLOAK_URL").unwrap_or(KEYCLOAK_URL.to_string())
+    }};
+}
+
+#[derive(Serialize)]
+struct HeaderKeyValue {
+    name: String,
+    value: String,
+}
+
+#[derive(Serialize)]
+struct PublishEndpoint {
+    url: String,
+    headers: Vec<HeaderKeyValue>,
+}
+
+#[derive(Serialize)]
+struct PublishIdEndpoint {
+    id: &'static str,
+    endpoint: PublishEndpoint,
+}
+
+macro_rules! cert_path {
+    () => {{
+        static CERT_PATH_DEFAULT: &'static str = "/cert/cert.pem";
+        std::env::var("CERT_PATH").unwrap_or(CERT_PATH_DEFAULT.to_string())
+    }};
+}
+
+macro_rules! key_path {
+    () => {{
+        static KEY_PATH_DEFAULT: &'static str = "/cert/key.pem";
+        std::env::var("KEY_PATH").unwrap_or(KEY_PATH_DEFAULT.to_string())
+    }};
+}
 
 #[actix_web::main]
 async fn main() {
@@ -62,58 +117,32 @@ async fn main() {
         env!("GIT_SHORT_REV")
     );
 
-    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
-    let mut centrifugo = run_centrifugo();
-    let (server_handle, server_task) = run_server().await;
+    let ui_port = std::env::var("UI_PORT")
+        .expect("UI_PORT missing")
+        .parse::<u64>()
+        .expect("UI_PORT format");
 
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            debug!("ctrl-c");
-            server_handle.stop(true).await;
-        },
-        _ = sigterm.recv() => {
-            debug!("SIGTERM received");
-            server_handle.stop(true).await;
-        },
-        _ = server_task => {
-            debug!("server stopped");
-            centrifugo.kill().await.expect("kill centrifugo failed");
-            debug!("centrifugo killed");
-        },
-        _ = centrifugo.wait() => {
-            debug!("centrifugo stopped");
-            server_handle.stop(true).await;
-            debug!("server stopped");
-        }
-    }
+    let ods_socket_path = std::env::var("SOCKET_PATH").expect("env SOCKET_PATH is missing");
+    fs::exists(&ods_socket_path).unwrap_or_else(|_| {
+        panic!(
+            "omnect device service socket file {} does not exist",
+            &ods_socket_path
+        )
+    });
+    let version_check_result = common::check_and_store_ods_version(&ods_socket_path)
+        .await
+        .expect("failed to check and store ods version");
 
-    debug!("good bye");
-}
-
-async fn run_server() -> (
-    ServerHandle,
-    tokio::task::JoinHandle<Result<(), std::io::Error>>,
-) {
     CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
 
-    let Ok(true) = fs::exists("/data") else {
-        panic!("data dir /data is missing");
-    };
+    certificate::create_module_certificate(&cert_path!(), &key_path!())
+        .await
+        .expect("failed to create module certificate");
 
-    if !fs::exists(config_path!()).is_ok_and(|ok| ok) {
-        fs::create_dir_all(config_path!()).expect("failed to create config directory");
-    };
-
-    common::create_frontend_config_file().expect("failed to create frontend config file");
-
-    let api = Api::new().await.expect("failed to create api");
-
-    let mut tls_certs = std::io::BufReader::new(
-        std::fs::File::open(certificate::cert_path()).expect("read certs_file"),
-    );
-    let mut tls_key = std::io::BufReader::new(
-        std::fs::File::open(certificate::key_path()).expect("read key_file"),
-    );
+    let mut tls_certs =
+        std::io::BufReader::new(std::fs::File::open(cert_path!()).expect("read certs_file"));
+    let mut tls_key =
+        std::io::BufReader::new(std::fs::File::open(key_path!()).expect("read key_file"));
 
     let tls_certs = rustls_pemfile::certs(&mut tls_certs)
         .collect::<Result<Vec<_>, _>>()
@@ -135,10 +164,43 @@ async fn run_server() -> (
         _ => panic!("unexpected item found in key pem file"),
     };
 
-    let ui_port = std::env::var("UI_PORT")
-        .expect("UI_PORT missing")
-        .parse::<u64>()
-        .expect("UI_PORT format");
+    fs::exists("/data").expect("data dir /data is missing");
+
+    let centrifugo_client_token_hmac_secret_key = Uuid::new_v4().to_string();
+    let centrifugo_http_api_key = Uuid::new_v4().to_string();
+
+    std::env::set_var(
+        "CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY",
+        &centrifugo_client_token_hmac_secret_key,
+    );
+    std::env::set_var("CENTRIFUGO_HTTP_API_KEY", &centrifugo_http_api_key);
+    std::env::set_var(
+        "CENTRIFUGO_HTTP_SERVER_PORT",
+        &centrifugo_http_server_port!(),
+    );
+
+    let index_html =
+        std::fs::canonicalize("static/index.html").expect("static/index.html not found");
+
+    let tenant = std::env::var("TENANT").expect("env TENANT is missing");
+
+    fs::exists(&update_os_path!())
+        .unwrap_or_else(|_| panic!("path {} for os update does not exist", &update_os_path!()));
+
+    common::create_frontend_config_file(&keycloak_url!())
+        .expect("failed to create frontend config file");
+
+    send_publish_endpoint(&centrifugo_http_api_key, &ods_socket_path).await;
+
+    let api_config = Api {
+        ods_socket_path: ods_socket_path.clone(),
+        update_os_path: update_os_path!(),
+        centrifugo_client_token_hmac_secret_key,
+        index_html,
+        keycloak_public_key_url: keycloak_url!(),
+        tenant,
+        version_check_result,
+    };
 
     let session_key = Key::generate();
 
@@ -159,7 +221,7 @@ async fn run_server() -> (
                     .total_limit(UPLOAD_LIMIT_BYTES)
                     .memory_limit(MEMORY_LIMIT_BYTES),
             )
-            .app_data(Data::new(api.clone()))
+            .app_data(Data::new(api_config.clone()))
             .route("/", web::get().to(Api::index))
             .route("/config.js", web::get().to(Api::config))
             .route(
@@ -218,33 +280,92 @@ async fn run_server() -> (
     .disable_signals()
     .run();
 
-    (server.handle(), tokio::spawn(server))
-}
+    let server_handle = server.handle();
+    let server_task = tokio::spawn(server);
 
-fn run_centrifugo() -> Child {
-    let centrifugo =
+    std::env::set_var("CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM", cert_path!());
+    std::env::set_var("CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM", key_path!());
+
+    let mut centrifugo =
         Command::new(std::fs::canonicalize("centrifugo").expect("centrifugo not found"))
             .arg("-c")
             .arg("/centrifugo_config.json")
-            .envs(vec![
-                (
-                    "CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM",
-                    certificate::cert_path(),
-                ),
-                (
-                    "CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM",
-                    certificate::key_path(),
-                ),
-                ("CENTRIFUGO_HTTP_SERVER_PORT", centrifugo_config().port),
-                (
-                    "CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY",
-                    centrifugo_config().client_token,
-                ),
-                ("CENTRIFUGO_HTTP_API_KEY", centrifugo_config().api_key),
-            ])
             .spawn()
             .expect("Failed to spawn child process");
 
     debug!("centrifugo pid: {}", centrifugo.id().unwrap());
-    centrifugo
+
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            debug!("ctrl-c");
+            delete_publish_endpoint(&ods_socket_path).await;
+            server_handle.stop(true).await;
+        },
+        _ = sigterm.recv() => {
+            debug!("SIGTERM received");
+            delete_publish_endpoint(&ods_socket_path).await;
+            server_handle.stop(true).await;
+        },
+        _ = server_task => {
+            debug!("server stopped");
+            centrifugo.kill().await.expect("kill centrifugo failed");
+            debug!("centrifugo killed");
+        },
+        _ = centrifugo.wait() => {
+            debug!("centrifugo stopped");
+            server_handle.stop(true).await;
+            debug!("server stopped");
+        }
+    }
+
+    debug!("good bye");
+}
+
+async fn send_publish_endpoint(
+    centrifugo_http_api_key: &str,
+    ods_socket_path: &str,
+) -> impl Responder {
+    let headers = vec![
+        HeaderKeyValue {
+            name: String::from("Content-Type"),
+            value: String::from("application/json"),
+        },
+        HeaderKeyValue {
+            name: String::from("X-API-Key"),
+            value: String::from(centrifugo_http_api_key),
+        },
+    ];
+
+    let body = PublishIdEndpoint {
+        id: env!("CARGO_PKG_NAME"),
+        endpoint: PublishEndpoint {
+            url: format!(
+                "https://localhost:{}/api/publish",
+                &centrifugo_http_server_port!()
+            ),
+            headers,
+        },
+    };
+
+    if let Err(e) =
+        socket_client::post_with_json_body("/publish-endpoint/v1", body, ods_socket_path).await
+    {
+        error!("sending publish endpoint failed: {e:#}");
+        HttpResponse::InternalServerError().finish();
+    }
+
+    HttpResponse::Ok().finish()
+}
+
+async fn delete_publish_endpoint(ods_socket_path: &str) -> impl Responder {
+    static ENDPOINT: &str = concat!("/publish-endpoint/v1/", env!("CARGO_PKG_NAME"));
+
+    if let Err(e) = socket_client::delete_with_empty_body(ENDPOINT, ods_socket_path).await {
+        error!("deleting publish endpoint failed: {e:#}");
+        HttpResponse::InternalServerError().finish();
+    }
+
+    HttpResponse::Ok().finish()
 }
