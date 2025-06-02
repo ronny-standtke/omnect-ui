@@ -6,7 +6,7 @@ import DialogContent from "../components/DialogContent.vue"
 import { useCentrifuge } from "../composables/useCentrifugo"
 import { useSnackbar } from "../composables/useSnackbar"
 import { CentrifugeSubscriptionType } from "../enums/centrifuge-subscription-type.enum"
-import type { FactoryResetKeys } from "../types"
+import type { FactoryReset } from "../types"
 
 const { subscribe, history, onConnected } = useCentrifuge()
 const { showError, snackbarState } = useSnackbar()
@@ -14,10 +14,11 @@ const router = useRouter()
 const selectedFactoryResetKeys: Ref<string[]> = ref([])
 const factoryResetDialog = ref(false)
 const rebootDialog = ref(false)
-const factoryResetKeys: Ref<FactoryResetKeys | undefined> = ref(undefined)
+const factoryResetKeys: Ref<Pick<FactoryReset, "keys"> | undefined> = ref(undefined)
 
 const factoryResetPayload = computed(() => {
 	return {
+		mode: 1,
 		preserve: selectedFactoryResetKeys.value
 	}
 })
@@ -101,13 +102,13 @@ onResetError(() => {
 	}
 })
 
-const updateFactoryResetKeys = (data: FactoryResetKeys) => {
+const updateFactoryResetKeys = (data: FactoryReset) => {
 	factoryResetKeys.value = data
 }
 
 const loadHistoryAndSubscribe = () => {
-	history(updateFactoryResetKeys, CentrifugeSubscriptionType.FactoryResetKeys)
-	subscribe(updateFactoryResetKeys, CentrifugeSubscriptionType.FactoryResetKeys)
+	history(updateFactoryResetKeys, CentrifugeSubscriptionType.FactoryReset)
+	subscribe(updateFactoryResetKeys, CentrifugeSubscriptionType.FactoryReset)
 }
 
 onConnected(() => {
@@ -122,7 +123,7 @@ onMounted(() => {
 <template>
 	<div class="flex flex-col gap-y-4 items-start">
 		<div class="text-h4 text-secondary border-b w-100">Commands</div>
-		<v-btn :prepend-icon="'mdi-refresh'" variant="text" :loading="reloadNetworkLoading" :disabled="loading"
+		<v-btn :prepend-icon="'mdi-refresh'" variant="text" :loading="reloadNetworkLoading.value" :disabled="loading"
 			@click="reloadNetwork(false)">
 			Restart network
 		</v-btn>

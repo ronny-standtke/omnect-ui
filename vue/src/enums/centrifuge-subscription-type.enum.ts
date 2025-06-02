@@ -3,7 +3,6 @@ export enum CentrifugeSubscriptionType {
 	SystemInfo = "SystemInfoV1",
 	Timeouts = "TimeoutsV1",
 	NetworkStatus = "NetworkStatusV1",
-	FactoryResetKeys = "FactoryResetKeysV1",
-	FactoryResetStatus = "FactoryResetStatusV1",
+	FactoryReset = "FactoryResetV1",
 	UpdateStatus = "UpdateValidationStatusV1"
 }

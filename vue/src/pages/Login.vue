@@ -10,6 +10,7 @@ const router = useRouter()
 const password = ref("")
 const visible = ref(false)
 const errorMsg = ref("")
+const isCheckingPasswordSetNeeded = ref(false)
 
 const doLogin = async (e: Event) => {
 	e.preventDefault()
@@ -42,10 +43,12 @@ const doLogin = async (e: Event) => {
 }
 
 onMounted(async () => {
+	isCheckingPasswordSetNeeded.value = true
 	const requireSetPassword = await fetch("require-set-password")
 	if (requireSetPassword.status === 201) {
 		await router.push(requireSetPassword.headers.get("Location") ?? "/set-password")
 	}
+	isCheckingPasswordSetNeeded.value = false
 
 	unsubscribeAll()
 	disconnect()
@@ -55,7 +58,7 @@ onMounted(async () => {
 <template>
 	<v-sheet class="mx-auto pa-12 pb-8 m-t-16 flex flex-col gap-y-16" border elevation="0" max-width="448" rounded="lg">
 		<OmnectLogo></OmnectLogo>
-		<v-form @submit.prevent @submit="doLogin">
+		<v-form v-if="!isCheckingPasswordSetNeeded" @submit.prevent @submit="doLogin">
 			<v-text-field label="Password" :append-inner-icon="visible ? 'mdi-eye-off' : 'mdi-eye'"
 				:type="visible ? 'text' : 'password'" density="compact" placeholder="Enter your password"
 				prepend-inner-icon="mdi-lock-outline" variant="outlined" @click:append-inner="visible = !visible"

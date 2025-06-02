@@ -36,7 +36,7 @@ pub fn key_path() -> String {
 }
 
 #[cfg(feature = "mock")]
-pub async fn create_module_certificate(_ods_client: &OmnectDeviceServiceClient) -> Result<()> {
+pub async fn create_module_certificate() -> Result<()> {
     Ok(())
 }
 

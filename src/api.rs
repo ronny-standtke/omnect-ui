@@ -122,11 +122,15 @@ impl Api {
     pub async fn factory_reset(
         body: web::Json<FactoryReset>,
         api: web::Data<Api>,
+        session: Session,
     ) -> impl Responder {
         debug!("factory_reset() called: {body:?}");
 
         match api.ods_client.factory_reset(body.into_inner()).await {
-            Ok(_) => HttpResponse::Ok().finish(),
+            Ok(_) => {
+                session.purge();
+                HttpResponse::Ok().finish()
+            }
             Err(e) => {
                 error!("factory_reset: {e:#}");
                 HttpResponse::InternalServerError().body(format!("{e}"))

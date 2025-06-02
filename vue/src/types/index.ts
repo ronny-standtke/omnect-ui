@@ -1,5 +1,4 @@
-export * from "./factory-reset-keys"
-export * from "./factory-reset-status"
+export * from "./factory-reset"
 export * from "./network-status"
 export * from "./online-status"
 export * from "./system-info"

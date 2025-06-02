@@ -28,34 +28,34 @@ const errorTitle = ref("")
 const errorMsg = ref("")
 
 onConnected(() => {
-  reset()
-  router.push("/login")
+	reset()
+	router.push("/login")
 })
 
 const toggleSideBar = () => {
-  showSideBar.value = !showSideBar.value
+	showSideBar.value = !showSideBar.value
 }
 
 const updateSidebarVisibility = (visible: boolean) => {
-  showSideBar.value = visible
+	showSideBar.value = visible
 }
 
 onMounted(async () => {
-  initializeCentrifuge()
+	initializeCentrifuge()
 
-  const res = await fetch("healthcheck", {
-    headers: {
-      "Cache-Control": "no-cache, no-store, must-revalidate",
-      Pragma: "no-cache",
-      Expires: "0"
-    }
-  })
-  const data = await res.json()
-  if (!res.ok) {
-    overlay.value = true
-    errorTitle.value = "omnect-device-service version mismatch"
-    errorMsg.value = `Current version: ${data.current}. Required version ${data.required}. Please consider to update omnect Secure OS.`
-  }
+	const res = await fetch("healthcheck", {
+		headers: {
+			"Cache-Control": "no-cache, no-store, must-revalidate",
+			Pragma: "no-cache",
+			Expires: "0"
+		}
+	})
+	const data = await res.json()
+	if (!res.ok) {
+		overlay.value = true
+		errorTitle.value = "omnect-device-service version mismatch"
+		errorMsg.value = `Current version: ${data.current}. Required version ${data.required}. Please consider to update omnect Secure OS.`
+	}
 })
 </script>
 
