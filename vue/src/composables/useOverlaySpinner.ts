@@ -9,7 +9,8 @@ export const useOverlaySpinner = createGlobalState(() => {
 		overlay: false,
 		title: "",
 		text: "",
-		isUpdateRunning: false
+		isUpdateRunning: false,
+		timedOut: false
 	})
 
 	const reset = () => {
@@ -17,6 +18,7 @@ export const useOverlaySpinner = createGlobalState(() => {
 		overlaySpinnerState.text = ""
 		overlaySpinnerState.title = ""
 		overlaySpinnerState.isUpdateRunning = false
+		overlaySpinnerState.timedOut = false
 	}
 
 	return { overlaySpinnerState, reset, updateDone }

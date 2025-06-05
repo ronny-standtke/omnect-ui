@@ -3,7 +3,12 @@ const props = defineProps<{
 	overlay: boolean
 	title: string
 	text?: string
+	timedOut: boolean
 }>()
+
+const refresh = () => {
+	window.location.reload()
+}
 </script>
 
 <template>
@@ -14,6 +19,7 @@ const props = defineProps<{
 				<div class="text-h4 text-center">{{ props.title }}</div>
 				<v-progress-circular color="secondary" indeterminate size="100" width="5"></v-progress-circular>
 				<p class="text-h6 m-t-4">{{ props.text }}</p>
+				<v-btn v-if="props.timedOut" text="Refresh" @click="refresh" />
 			</v-sheet>
 		</div>
 	</v-overlay>

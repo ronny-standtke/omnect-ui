@@ -6,7 +6,7 @@ import { useOverlaySpinner } from "../composables/useOverlaySpinner"
 import { useWaitReconnect } from "../composables/useWaitReconnect"
 
 const { overlaySpinnerState } = useOverlaySpinner()
-const { startWaitReconnect } = useWaitReconnect()
+const { startWaitReconnect, onTimeout } = useWaitReconnect()
 
 const showIsRebooting = () => {
 	overlaySpinnerState.title = "Device is rebooting"
@@ -15,11 +15,17 @@ const showIsRebooting = () => {
 }
 
 const showIsResetting = () => {
-	overlaySpinnerState.title = "The device is being reset"
-	overlaySpinnerState.text = "Please have some patience, the resetting may take some time."
+	overlaySpinnerState.title = "The device is resetting"
+	overlaySpinnerState.text =
+		"Please have some patience, the resetting may take some time. The app will be removed from the device. If the device is online the app will be reinstalled automatically after some time."
 	overlaySpinnerState.overlay = true
 	startWaitReconnect()
 }
+
+onTimeout(() => {
+	overlaySpinnerState.text = `${overlaySpinnerState.text} The device did not come back online after 5 minutes. Please check the device manually.`
+	overlaySpinnerState.timedOut = true
+})
 </script>
 
 <template>
