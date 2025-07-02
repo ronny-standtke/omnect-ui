@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type Ref, computed, onMounted, ref } from "vue"
+import { computed, onMounted, type Ref, ref } from "vue"
 import { useCentrifuge } from "../composables/useCentrifugo"
 import { CentrifugeSubscriptionType } from "../enums/centrifuge-subscription-type.enum"
 import { type FactoryReset, type FactoryResetResult, FactoryResetStatus, type OnlineStatus, type SystemInfo, type Timeouts } from "../types"

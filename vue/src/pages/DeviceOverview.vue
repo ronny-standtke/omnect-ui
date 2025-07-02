@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import DeviceActions from "../components/DeviceActions.vue"
 import DeviceInfo from "../components/DeviceInfo.vue"
-import DeviceNetworks from "../components/DeviceNetworks.vue"
 import { useOverlaySpinner } from "../composables/useOverlaySpinner"
 import { useWaitReconnect } from "../composables/useWaitReconnect"
 
@@ -33,7 +32,6 @@ onTimeout(() => {
 		<div class="grid grid-cols-[1fr_auto] gap-8 gap-x-16 m-8">
 			<div class="flex flex-col gap-y-16">
 				<DeviceInfo />
-				<DeviceNetworks></DeviceNetworks>
 			</div>
 			<DeviceActions @reboot-in-progress="showIsRebooting" @factory-reset-in-progress="showIsResetting">
 			</DeviceActions>
