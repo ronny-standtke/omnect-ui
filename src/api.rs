@@ -13,6 +13,7 @@ use argon2::{
     Argon2,
     password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
 };
+use ini::Ini;
 use jwt_simple::prelude::*;
 use log::{debug, error};
 use serde::Deserialize;
@@ -42,6 +43,12 @@ macro_rules! tmp_path {
     };
 }
 
+macro_rules! network_path {
+    ($filename:expr) => {
+        Path::new("/network/").join($filename)
+    };
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct TokenClaims {
     roles: Option<Vec<String>>,
@@ -60,6 +67,17 @@ pub struct SetPasswordPayload {
 pub struct UpdatePasswordPayload {
     current_password: String,
     password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSetting {
+    name: String,
+    dhcp: bool,
+    ip: Option<String>,
+    netmask: Option<u8>,
+    gateway: Option<Vec<String>>,
+    dns: Option<Vec<String>>,
 }
 
 #[derive(MultipartForm)]
@@ -247,7 +265,7 @@ impl Api {
 
         if let Err(e) = Api::store_or_update_password(&body.password) {
             error!("set_password() failed: {e:#}");
-            return HttpResponse::InternalServerError().body(format!("{:#}", e));
+            return HttpResponse::InternalServerError().body(format!("{e:#}"));
         }
 
         Api::session_token(session)
@@ -266,7 +284,7 @@ impl Api {
 
         if let Err(e) = Api::store_or_update_password(&body.password) {
             error!("update_password() failed: {e:#}");
-            return HttpResponse::InternalServerError().body(format!("{:#}", e));
+            return HttpResponse::InternalServerError().body(format!("{e:#}"));
         }
 
         session.purge();
@@ -293,6 +311,115 @@ impl Api {
             return HttpResponse::Unauthorized().finish();
         }
         HttpResponse::Ok().finish()
+    }
+
+    pub async fn set_network(
+        body: web::Json<NetworkSetting>,
+        api: web::Data<Api>,
+    ) -> impl Responder {
+        debug!("set_network() called");
+
+        if body.name.is_empty() {
+            return HttpResponse::BadRequest().body("Network name cannot be empty");
+        }
+
+        if let Some(ip) = &body.ip {
+            if !ip.is_empty() && ip.parse::<std::net::IpAddr>().is_err() {
+                return HttpResponse::BadRequest().body("Invalid IP address format");
+            }
+        }
+
+        if let Some(netmask) = &body.netmask {
+            if *netmask > 32 {
+                return HttpResponse::BadRequest().body("Netmask must be between 0 and 32");
+            }
+        }
+
+        if let Some(gateway) = &body.gateway {
+            for gw in gateway {
+                if !gw.is_empty() && gw.parse::<std::net::IpAddr>().is_err() {
+                    return HttpResponse::BadRequest().body("Invalid gateway format");
+                }
+            }
+        }
+
+        if let Some(dns) = &body.dns {
+            for dns_entry in dns {
+                if !dns_entry.is_empty() && dns_entry.parse::<std::net::IpAddr>().is_err() {
+                    return HttpResponse::BadRequest().body("Invalid DNS format");
+                }
+            }
+        }
+
+        if let Err(e) = api.configure_network_interface(body.into_inner()) {
+            error!("validate_portal_token() failed: {e:#}");
+            return HttpResponse::InternalServerError().body(format!("{e:#}"));
+        }
+
+        //TODO: Trigger ods network/v1
+        //      Renew cert
+        //      Start timer
+
+        HttpResponse::Ok().finish()
+    }
+
+    fn configure_network_interface(&self, network: NetworkSetting) -> Result<()> {
+        let config_file = network_path!(format!("10-{}.network", network.name));
+
+        if fs::exists(&config_file)? {
+            fs::rename(config_file, format!("10-{}.network.old", network.name))?;
+        }
+
+        if network.dhcp {
+            self.store_dhcp_network_setting(network)?;
+        } else {
+            self.store_static_network_setting(network)?;
+        }
+
+        Ok(())
+    }
+
+    fn store_dhcp_network_setting(&self, network: NetworkSetting) -> Result<()> {
+        let mut ini = Ini::new();
+
+        ini.with_section(Some("Match".to_owned()))
+            .set("Name", &network.name);
+
+        ini.with_section(Some("Network").to_owned())
+            .set("DHCP", "yes");
+
+        ini.write_to_file(network_path!(format!("10-{}.network", &network.name)))?;
+
+        Ok(())
+    }
+
+    fn store_static_network_setting(&self, network: NetworkSetting) -> Result<()> {
+        let mut ini = Ini::new();
+
+        ini.with_section(Some("Match".to_owned()))
+            .set("Name", &network.name);
+
+        ini.with_section(Some("Network").to_owned()).set(
+            "Address",
+            format!("{:?}/{:?}", &network.ip, &network.netmask),
+        );
+
+        if let Some(gateways) = &network.gateway {
+            for gateway in gateways {
+                ini.with_section(Some("Network".to_owned()))
+                    .add("Gateway", gateway);
+            }
+        }
+
+        if let Some(dnss) = &network.dns {
+            for dns in dnss {
+                ini.with_section(Some("Network".to_owned())).add("DNS", dns);
+            }
+        }
+
+        ini.write_to_file(network_path!(format!("10-{}.network", &network.name)))?;
+
+        Ok(())
     }
 
     async fn validate_token_and_claims(&self, token: &str) -> Result<()> {

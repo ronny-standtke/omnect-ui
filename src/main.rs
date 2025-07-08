@@ -211,6 +211,7 @@ async fn run_server() -> (
             .route("/version", web::get().to(Api::version))
             .route("/logout", web::post().to(Api::logout))
             .route("/healthcheck", web::get().to(Api::healthcheck))
+            .route("/network", web::post().to(Api::set_network))
             .service(Files::new(
                 "/static",
                 std::fs::canonicalize("static").expect("static folder not found"),

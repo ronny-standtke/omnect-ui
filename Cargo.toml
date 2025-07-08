@@ -43,6 +43,7 @@ log-panics = { version = "2.1", default-features = false, features = [
 ] }
 rand_core = { version = "0.9", default-features = false, features = ["std"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rust-ini = { version = "0.21", default-features = false }
 rustls = { version = "0.23", default-features = false, features = [
   "aws_lc_rs",
   "std",
