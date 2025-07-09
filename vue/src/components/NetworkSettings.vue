@@ -3,49 +3,83 @@ import { computed, ref } from "vue"
 import { useSnackbar } from "../composables/useSnackbar"
 import type { DeviceNetwork } from "../types"
 
-const { showSuccess } = useSnackbar()
+const { showSuccess, showError } = useSnackbar()
 const props = defineProps<{
-	networkAdapter: DeviceNetwork
+    networkAdapter: DeviceNetwork
 }>()
 
 const ipAddress = ref(props.networkAdapter?.ipv4?.addrs[0]?.addr || "")
 const dns = ref(props.networkAdapter?.ipv4?.dns?.join("\n") || "")
 const gateways = ref(props.networkAdapter?.ipv4?.gateways?.join("\n") || "")
 const addressAssignment = ref(props.networkAdapter?.ipv4?.addrs[0]?.dhcp ? "dhcp" : "static")
-const netmask = ref(props.networkAdapter?.ipv4?.addrs[0]?.prefix_len.toString() || "24")
+const netmask = ref(props.networkAdapter?.ipv4?.addrs[0]?.prefix_len || 24)
 const isDHCP = computed(() => addressAssignment.value === "dhcp")
+const isSubmitting = ref(false)
+const isServerAddr = computed(() => props.networkAdapter?.ipv4?.addrs[0]?.addr === location.hostname)
+const ipChanged = computed(() => props.networkAdapter?.ipv4?.addrs[0]?.addr !== ipAddress.value)
 
 const copyToClipboard = (text: string) => {
-	navigator.clipboard.writeText(text).then(() => {
-		showSuccess("Copied to clipboard")
-	})
+    navigator.clipboard.writeText(text).then(() => {
+        showSuccess("Copied to clipboard")
+    })
 }
 
 const restoreSettings = () => {
-	ipAddress.value = props.networkAdapter?.ipv4?.addrs[0]?.addr || ""
-	addressAssignment.value = props.networkAdapter?.ipv4?.addrs[0]?.dhcp ? "dhcp" : "static"
-	netmask.value = props.networkAdapter?.ipv4?.addrs[0]?.prefix_len.toString() || "24"
-	dns.value = props.networkAdapter?.ipv4?.dns?.join("\n") || ""
-	gateways.value = props.networkAdapter?.ipv4?.gateways?.join("\n") || ""
+    ipAddress.value = props.networkAdapter?.ipv4?.addrs[0]?.addr || ""
+    addressAssignment.value = props.networkAdapter?.ipv4?.addrs[0]?.dhcp ? "dhcp" : "static"
+    netmask.value = props.networkAdapter?.ipv4?.addrs[0]?.prefix_len || 24
+    dns.value = props.networkAdapter?.ipv4?.dns?.join("\n") || ""
+    gateways.value = props.networkAdapter?.ipv4?.gateways?.join("\n") || ""
 }
 
 const isValidIp = (value: string) => {
-	if (!value) return true
-	const regex = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
-	return regex.test(value) || "Invalid IPv4-Address"
+    if (!value) return true
+    const regex = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
+    return regex.test(value) || "Invalid IPv4-Address"
 }
 
 const setNetMask = (mask: string) => {
-	const prefixLen = Number.parseInt(mask.replace("/", ""), 10)
-	if (isNaN(prefixLen) || prefixLen < 0 || prefixLen > 32) {
-		return "Invalid netmask"
-	}
-	netmask.value = prefixLen.toString()
+    const prefixLen = Number.parseInt(mask.replace("/", ""), 10)
+    if (isNaN(prefixLen) || prefixLen < 0 || prefixLen > 32) {
+        return "Invalid netmask"
+    }
+    netmask.value = prefixLen
 }
 
-const submit = (_e: Event) => {
-	console.log("Submitting network settings")
-}
+const submit = (async () => {
+    try {
+        isSubmitting.value = true
+
+        const res = await fetch("network", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                isServerAddr: isServerAddr.value,
+                ipChanged: ipChanged.value,
+                name: props.networkAdapter.name,
+                dhcp: isDHCP.value,
+                ip: ipAddress.value ?? null,
+                netmask: netmask.value ?? null,
+                gateway: gateways.value.split("\n") ?? [],
+                dns: dns.value.split("\n") ?? []
+            })
+        })
+
+        if (res.ok) {
+            showSuccess("Updated")
+        } else {
+            const errorMsg = await res.text()
+            showError(`Failed to set network settings: ${errorMsg}`)
+        }
+    } catch (e) {
+        showError(`Failed to set network settings: ${e}`)
+    } finally {
+        isSubmitting.value = false
+    }
+})
+
 </script>
 
 <template>
@@ -79,17 +113,15 @@ const submit = (_e: Event) => {
             <v-text-field label="MAC Address" variant="outlined" readonly v-model="props.networkAdapter.mac"
                 append-inner-icon="mdi-content-copy"
                 @click:append-inner="copyToClipboard(props.networkAdapter.mac)"></v-text-field>
-            <v-textarea :readonly="isDHCP" v-model="dns" label="DNS" variant="outlined" rows="3" no-resize
+            <v-textarea :readonly="isDHCP" v-model="gateways" label="Gateways" variant="outlined" rows="3" no-resize
                 append-inner-icon="mdi-content-copy" @click:append-inner="copyToClipboard(ipAddress)"></v-textarea>
-            <v-textarea v-model="gateways" label="Gateways" variant="outlined" rows="3" no-resize
-                append-inner-icon="mdi-content-copy" @click:append-inner="copyToClipboard(ipAddress)">
-            </v-textarea>
-
+            <v-textarea v-model="dns" label="DNS" variant="outlined" rows="3" no-resize
+                append-inner-icon="mdi-content-copy" @click:append-inner="copyToClipboard(ipAddress)"></v-textarea>
             <div class="flex flex-row gap-x-4">
-                <v-btn color="secondary" type="submit" variant="text">
+                <v-btn color="secondary" type="submit" variant="text" :loading="isSubmitting">
                     Save
                 </v-btn>
-                <v-btn type="reset" variant="text" @click.prevent="restoreSettings">
+                <v-btn :disabled="isSubmitting" type="reset" variant="text" @click.prevent="restoreSettings">
                     Reset
                 </v-btn>
             </div>

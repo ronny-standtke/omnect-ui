@@ -1,4 +1,5 @@
 use crate::{
+    certificate,
     common::{centrifugo_config, config_path, validate_password},
     keycloak_client,
     middleware::TOKEN_EXPIRE_HOURS,
@@ -24,6 +25,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use tokio::task;
 
 macro_rules! data_path {
     ($filename:expr) => {
@@ -69,9 +71,11 @@ pub struct UpdatePasswordPayload {
     password: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkSetting {
+    is_server_addr: bool,
+    ip_changed: bool,
     name: String,
     dhcp: bool,
     ip: Option<String>,
@@ -351,30 +355,62 @@ impl Api {
             }
         }
 
-        if let Err(e) = api.configure_network_interface(body.into_inner()) {
-            error!("validate_portal_token() failed: {e:#}");
+        if let Err(e) = api.configure_network_interface(body.clone()).await {
+            let _ = api.restore_network_setting(body.into_inner());
+            error!("set_network() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{e:#}"));
         }
-
-        //TODO: Trigger ods network/v1
-        //      Renew cert
-        //      Start timer
 
         HttpResponse::Ok().finish()
     }
 
-    fn configure_network_interface(&self, network: NetworkSetting) -> Result<()> {
+    fn restore_network_setting(&self, network: NetworkSetting) -> Result<()> {
         let config_file = network_path!(format!("10-{}.network", network.name));
+        let backup_file = network_path!(format!("10-{}.network.old", network.name));
 
         if fs::exists(&config_file)? {
-            fs::rename(config_file, format!("10-{}.network.old", network.name))?;
+            fs::remove_file(&config_file)?;
+        }
+
+        if fs::exists(&backup_file)? {
+            fs::rename(backup_file, config_file)?;
+        }
+
+        Ok(())
+    }
+
+    async fn configure_network_interface(&self, network: NetworkSetting) -> Result<()> {
+        let config_file = network_path!(format!("10-{}.network", &network.name));
+        let backup_file = network_path!(format!("10-{}.network.old", &network.name));
+
+        let config_file_exists = Path::new(&backup_file).exists();
+
+        println!("File {:?} exists {config_file_exists}", config_file);
+
+        if config_file_exists {
+            fs::remove_file(&backup_file).context("Unable to remove backup file")?;
+        }
+
+        if fs::exists(&config_file).context("Failed to check for network file")? {
+            fs::rename(config_file, backup_file).context("Failed to back up file")?;
         }
 
         if network.dhcp {
-            self.store_dhcp_network_setting(network)?;
+            self.store_dhcp_network_setting(network.clone())?;
         } else {
-            self.store_static_network_setting(network)?;
+            self.store_static_network_setting(network.clone())?;
         }
+
+        let ods_client = Arc::clone(&self.ods_client);
+        task::spawn(async move {
+            let _ = ods_client.reload_network().await;
+        });
+
+        if network.is_server_addr && network.ip_changed {
+            task::spawn(certificate::create_module_certificate());
+        }
+
+        //TODO: Start timer
 
         Ok(())
     }
@@ -388,7 +424,8 @@ impl Api {
         ini.with_section(Some("Network").to_owned())
             .set("DHCP", "yes");
 
-        ini.write_to_file(network_path!(format!("10-{}.network", &network.name)))?;
+        ini.write_to_file(network_path!(format!("10-{}.network", &network.name)))
+            .context("Failed to save new config file")?;
 
         Ok(())
     }
@@ -399,25 +436,30 @@ impl Api {
         ini.with_section(Some("Match".to_owned()))
             .set("Name", &network.name);
 
-        ini.with_section(Some("Network").to_owned()).set(
+        let mut network_section = ini.with_section(Some("Network").to_owned());
+
+        network_section.set(
             "Address",
-            format!("{:?}/{:?}", &network.ip, &network.netmask),
+            format!(
+                "{}/{}",
+                network.ip.unwrap().as_str(),
+                network.netmask.unwrap()
+            ),
         );
 
-        if let Some(gateways) = &network.gateway {
+        if let Some(gateways) = network.gateway {
             for gateway in gateways {
-                ini.with_section(Some("Network".to_owned()))
-                    .add("Gateway", gateway);
+                network_section.add("Gateway", gateway);
             }
         }
 
-        if let Some(dnss) = &network.dns {
+        if let Some(dnss) = network.dns {
             for dns in dnss {
-                ini.with_section(Some("Network".to_owned())).add("DNS", dns);
+                network_section.add("DNS", dns);
             }
         }
 
-        ini.write_to_file(network_path!(format!("10-{}.network", &network.name)))?;
+        ini.write_to_file(network_path!(format!("10-{}.network", network.name)))?;
 
         Ok(())
     }
