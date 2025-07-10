@@ -27,7 +27,7 @@ export function useWaitForNewIp() {
 
 	const checkForNewIp = async () => {
 		try {
-			const res = await fetch(`${url}/healthcheck`, {
+			const res = await fetch(`${url.value}/healthcheck`, {
 				headers: {
 					"Cache-Control": "no-cache, no-store, must-revalidate",
 					Pragma: "no-cache",
