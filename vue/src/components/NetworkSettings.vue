@@ -2,6 +2,7 @@
 import { computed, ref } from "vue"
 import { useSnackbar } from "../composables/useSnackbar"
 import type { DeviceNetwork } from "../types"
+import { useWaitForNewIp } from "../composables/useWaitForNewIp";
 
 const { showSuccess, showError } = useSnackbar()
 const props = defineProps<{
@@ -17,6 +18,8 @@ const isDHCP = computed(() => addressAssignment.value === "dhcp")
 const isSubmitting = ref(false)
 const isServerAddr = computed(() => props.networkAdapter?.ipv4?.addrs[0]?.addr === location.hostname)
 const ipChanged = computed(() => props.networkAdapter?.ipv4?.addrs[0]?.addr !== ipAddress.value)
+const overlay = ref(false)
+const { startWaitForNewIp, onConnected } = useWaitForNewIp()
 
 const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -46,7 +49,11 @@ const setNetMask = (mask: string) => {
     netmask.value = prefixLen
 }
 
-const submit = (async () => {
+onConnected(() => {
+    window.location.replace(`https://${ipAddress.value}:${window.location.port}`)
+})
+
+const submit = async () => {
     try {
         isSubmitting.value = true
 
@@ -68,7 +75,12 @@ const submit = (async () => {
         })
 
         if (res.ok) {
-            showSuccess("Updated")
+            if (isServerAddr.value && ipChanged.value) {
+                overlay.value = true
+                startWaitForNewIp(`https://${ipAddress.value}:${window.location.port}`)
+            } else {
+                showSuccess("Network setting set successfully")
+            }
         } else {
             const errorMsg = await res.text()
             showError(`Failed to set network settings: ${errorMsg}`)
@@ -78,12 +90,15 @@ const submit = (async () => {
     } finally {
         isSubmitting.value = false
     }
-})
-
+}
 </script>
 
 <template>
     <div>
+        <OverlaySpinner :overlay="true" title="Applying network setting"
+            text="The network settings are applied. You will be forwarded to the new IP. Log in to confirm the settings. If you do not log in within 90 seconds, the IP will be reset."
+            :timed-out="false">
+        </OverlaySpinner>
         <v-form @submit.prevent="submit" class="flex flex-col gap-y-4 ml-4">
             <v-chip size="large" class="ma-2" label
                 :color="props.networkAdapter.online ? 'light-green-darken-2' : 'red-darken-2'">
