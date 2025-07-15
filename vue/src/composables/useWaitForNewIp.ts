@@ -11,7 +11,6 @@ const connectedEvent = useEventHook()
 
 export function useWaitForNewIp() {
 	const url = ref("")
-	const wasDown = ref(false)
 	const reconnectInterval = ref()
 
 	const startWaitForNewIp = async (newUrl: string) => {
@@ -20,7 +19,6 @@ export function useWaitForNewIp() {
 	}
 
 	const stopWaitForNewIp = () => {
-		wasDown.value = false
 		clearInterval(reconnectInterval.value)
 		connectedEvent.trigger()
 	}
@@ -35,7 +33,7 @@ export function useWaitForNewIp() {
 				}
 			})
 
-			if (res.status === 200 && wasDown.value) {
+			if (res.status === 200) {
 				stopWaitForNewIp()
 			}
 		} catch (error) {
@@ -43,13 +41,11 @@ export function useWaitForNewIp() {
 
 			if (e.name === "TypeError") {
 				const code = e?.cause?.code
-				if (code === "SELF_SIGNED_CERT_IN_CHAIN" && wasDown.value) {
+				if (code === "SELF_SIGNED_CERT_IN_CHAIN") {
 					stopWaitForNewIp()
 					return
 				}
 			}
-
-			wasDown.value = true
 		}
 	}
 

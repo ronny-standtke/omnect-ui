@@ -24,16 +24,46 @@ use actix_web::{
 use anyhow::Result;
 use common::{centrifugo_config, config_path};
 use env_logger::{Builder, Env, Target};
-use log::{debug, info};
+use log::{debug, error, info};
 use rustls::crypto::{CryptoProvider, ring::default_provider};
-use std::{fs, io::Write};
+use std::{fs, io::Write, sync::Arc};
 use tokio::{
     process::{Child, Command},
     signal::unix::{SignalKind, signal},
+    sync::{RwLock, broadcast},
+    task::AbortHandle,
 };
 
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
+
+// Global server restart signal
+static SERVER_RESTART_TX: std::sync::OnceLock<broadcast::Sender<()>> = std::sync::OnceLock::new();
+
+// Global rollback timer handle
+static ROLLBACK_TIMER: std::sync::OnceLock<Arc<RwLock<Option<AbortHandle>>>> =
+    std::sync::OnceLock::new();
+
+pub fn trigger_server_restart() {
+    if let Some(tx) = SERVER_RESTART_TX.get() {
+        let _ = tx.send(());
+    }
+}
+
+pub async fn cancel_rollback_timer() {
+    if let Some(timer_handle) = ROLLBACK_TIMER.get() {
+        if let Some(handle) = timer_handle.write().await.take() {
+            handle.abort();
+            info!("Rollback timer cancelled - network change confirmed");
+        }
+    }
+}
+
+pub async fn set_rollback_timer(handle: AbortHandle) {
+    if let Some(timer_handle) = ROLLBACK_TIMER.get() {
+        *timer_handle.write().await = Some(handle);
+    }
+}
 
 #[actix_web::main]
 async fn main() {
@@ -63,32 +93,61 @@ async fn main() {
         env!("GIT_SHORT_REV")
     );
 
-    create_module_certificate()
+    create_module_certificate(None)
         .await
         .expect("failed to create module certificate");
 
-    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
-    let mut centrifugo = run_centrifugo();
-    let (server_handle, server_task) = run_server().await;
+    // Create restart signal channel
+    let (restart_tx, mut restart_rx) = broadcast::channel(1);
+    SERVER_RESTART_TX
+        .set(restart_tx)
+        .expect("Failed to set restart channel");
 
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            debug!("ctrl-c");
-            server_handle.stop(true).await;
-        },
-        _ = sigterm.recv() => {
-            debug!("SIGTERM received");
-            server_handle.stop(true).await;
-        },
-        _ = server_task => {
-            debug!("server stopped");
-            centrifugo.kill().await.expect("kill centrifugo failed");
-            debug!("centrifugo killed");
-        },
-        _ = centrifugo.wait() => {
-            debug!("centrifugo stopped");
-            server_handle.stop(true).await;
-            debug!("server stopped");
+    // Initialize rollback timer handle
+    ROLLBACK_TIMER
+        .set(Arc::new(RwLock::new(None)))
+        .expect("Failed to set rollback timer");
+
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+
+    CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
+
+    loop {
+        let mut centrifugo = run_centrifugo();
+        let (server_handle, server_task) = run_server().await;
+
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                debug!("ctrl-c");
+                server_handle.stop(true).await;
+                break;
+            },
+            _ = sigterm.recv() => {
+                debug!("SIGTERM received");
+                server_handle.stop(true).await;
+                break;
+            },
+            _ = restart_rx.recv() => {
+                debug!("Server restart requested");
+                server_handle.stop(true).await;
+                centrifugo.kill().await.expect("kill centrifugo failed");
+                info!("Server stopped, restarting...");
+            },
+            result = server_task => {
+                match result {
+                    Ok(_) => debug!("server stopped normally"),
+                    Err(e) => debug!("server stopped with error: {e}"),
+                }
+                centrifugo.kill().await.expect("kill centrifugo failed");
+                debug!("centrifugo killed");
+                break;
+            },
+            _ = centrifugo.wait() => {
+                debug!("centrifugo stopped");
+                server_handle.stop(true).await;
+                debug!("server stopped");
+                break;
+            }
         }
     }
 
@@ -99,8 +158,6 @@ async fn run_server() -> (
     ServerHandle,
     tokio::task::JoinHandle<Result<(), std::io::Error>>,
 ) {
-    CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
-
     let Ok(true) = fs::exists("/data") else {
         panic!("data dir /data is missing");
     };
@@ -112,6 +169,10 @@ async fn run_server() -> (
     common::create_frontend_config_file().expect("failed to create frontend config file");
 
     let api = Api::new().await.expect("failed to create api");
+
+    if let Err(e) = api.check_and_execute_pending_rollback().await {
+        error!("Failed to check pending rollback: {e:#}");
+    }
 
     let mut tls_certs = std::io::BufReader::new(
         std::fs::File::open(certificate::cert_path()).expect("read certs_file"),

@@ -70,6 +70,7 @@ const submit = async () => {
                 name: props.networkAdapter.name,
                 dhcp: isDHCP.value,
                 ip: ipAddress.value ?? null,
+                previousIp: props.networkAdapter.ipv4?.addrs[0]?.addr,
                 netmask: netmask.value ?? null,
                 gateway: gateways.value.split("\n") ?? [],
                 dns: dns.value.split("\n") ?? []
