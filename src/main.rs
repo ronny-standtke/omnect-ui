@@ -7,6 +7,7 @@ mod omnect_device_service_client;
 mod socket_client;
 
 use crate::{api::Api, certificate::create_module_certificate};
+use actix_cors::Cors;
 use actix_files::Files;
 use actix_multipart::form::MultipartFormConfig;
 use actix_server::ServerHandle;
@@ -148,6 +149,14 @@ async fn run_server() -> (
 
     let server = HttpServer::new(move || {
         App::new()
+            .wrap(
+                Cors::default()
+                    .allow_any_origin()
+                    .allow_any_header()
+                    .allowed_methods(vec!["GET"])
+                    .supports_credentials()
+                    .max_age(3600),
+            )
             .wrap(
                 SessionMiddleware::builder(CookieSessionStore::default(), session_key.clone())
                     .cookie_name(String::from("omnect-ui-session"))

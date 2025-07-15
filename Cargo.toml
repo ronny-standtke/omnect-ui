@@ -66,6 +66,7 @@ tokio = { version = "1.45", default-features = false, features = [
 uuid = { version = "1.17", default-features = false, features = [
   "v4",
 ] }
+actix-cors = { version = "0.7", default-features = false }
 
 [features]
 mock = []

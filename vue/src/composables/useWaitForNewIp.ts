@@ -41,17 +41,15 @@ export function useWaitForNewIp() {
 		} catch (error) {
 			const e = error as FetchError
 
-			if (e.name === "TimeoutError") {
-				wasDown.value = true
-				return
-			}
-
 			if (e.name === "TypeError") {
 				const code = e?.cause?.code
 				if (code === "SELF_SIGNED_CERT_IN_CHAIN" && wasDown.value) {
 					stopWaitForNewIp()
+					return
 				}
 			}
+
+			wasDown.value = true
 		}
 	}
 
