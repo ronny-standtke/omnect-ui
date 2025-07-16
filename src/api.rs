@@ -426,8 +426,10 @@ impl Api {
                 .find(|iface| iface.name == network.name)
                 .context("Failed to find current network interface")?;
 
-            if Path::new(&current_network.file).exists() {
-                fs::rename(&current_network.file, backup_file)
+            let config_file = network_path!(Path::new(&current_network.file).file_name().unwrap());
+
+            if Path::new(&config_file).exists() {
+                fs::rename(&config_file, backup_file)
                     .context("Failed to back up current network file")?;
             }
         }
