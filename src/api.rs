@@ -415,11 +415,21 @@ impl Api {
             fs::remove_file(&backup_file).context("Unable to remove backup file")?;
         }
 
-        //TODO: check for any other network file that might need to be renamed
-        //      get information from ods_client about current network settings
-
         if Path::new(&config_file).exists() {
             fs::rename(config_file, backup_file).context("Failed to back up file")?;
+        } else {
+            let status = self.ods_client.status().await?;
+            let current_network = status
+                .network_status
+                .network_interfaces
+                .iter()
+                .find(|iface| iface.name == network.name)
+                .context("Failed to find current network interface")?;
+
+            if Path::new(&current_network.file).exists() {
+                fs::rename(&current_network.file, backup_file)
+                    .context("Failed to back up current network file")?;
+            }
         }
 
         if network.dhcp {

@@ -56,6 +56,8 @@ pub struct NetworkStatus {
 pub struct NetworkInterface {
     pub online: bool,
     pub ipv4: Ipv4Info,
+    pub file: String,
+    pub name: String,
 }
 
 #[derive(Deserialize)]
