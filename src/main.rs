@@ -6,7 +6,10 @@ mod middleware;
 mod omnect_device_service_client;
 mod socket_client;
 
-use crate::{api::Api, certificate::create_module_certificate};
+use crate::{
+    api::Api, certificate::create_module_certificate,
+    omnect_device_service_client::OmnectDeviceServiceClient,
+};
 use actix_files::Files;
 use actix_multipart::form::MultipartFormConfig;
 use actix_server::ServerHandle;
@@ -23,6 +26,7 @@ use actix_web::{
 use anyhow::Result;
 use common::{centrifugo_config, config_path};
 use env_logger::{Builder, Env, Target};
+use keycloak_client::KeycloakProvider;
 use log::{debug, info};
 use rustls::crypto::{CryptoProvider, ring::default_provider};
 use std::{fs, io::Write};
@@ -110,7 +114,16 @@ async fn run_server() -> (
 
     common::create_frontend_config_file().expect("failed to create frontend config file");
 
-    let api = Api::new().await.expect("failed to create api");
+    type UiApi = Api<OmnectDeviceServiceClient, KeycloakProvider>;
+
+    let api = UiApi::new(
+        OmnectDeviceServiceClient::new(true)
+            .await
+            .expect("failed to create client to device service"),
+        Default::default(),
+    )
+    .await
+    .expect("failed to create api");
 
     let mut tls_certs = std::io::BufReader::new(
         std::fs::File::open(certificate::cert_path()).expect("read certs_file"),
@@ -164,58 +177,62 @@ async fn run_server() -> (
                     .memory_limit(MEMORY_LIMIT_BYTES),
             )
             .app_data(Data::new(api.clone()))
-            .route("/", web::get().to(Api::index))
-            .route("/config.js", web::get().to(Api::config))
+            .route("/", web::get().to(UiApi::index))
+            .route("/config.js", web::get().to(UiApi::config))
             .route(
                 "/factory-reset",
-                web::post().to(Api::factory_reset).wrap(middleware::AuthMw),
+                web::post()
+                    .to(UiApi::factory_reset)
+                    .wrap(middleware::AuthMw),
             )
             .route(
                 "/reboot",
-                web::post().to(Api::reboot).wrap(middleware::AuthMw),
+                web::post().to(UiApi::reboot).wrap(middleware::AuthMw),
             )
             .route(
                 "/reload-network",
-                web::post().to(Api::reload_network).wrap(middleware::AuthMw),
+                web::post()
+                    .to(UiApi::reload_network)
+                    .wrap(middleware::AuthMw),
             )
             .route(
                 "/update/file",
-                web::post().to(Api::save_file).wrap(middleware::AuthMw),
+                web::post().to(UiApi::save_file).wrap(middleware::AuthMw),
             )
             .route(
                 "/update/load",
-                web::post().to(Api::load_update).wrap(middleware::AuthMw),
+                web::post().to(UiApi::load_update).wrap(middleware::AuthMw),
             )
             .route(
                 "/update/run",
-                web::post().to(Api::run_update).wrap(middleware::AuthMw),
+                web::post().to(UiApi::run_update).wrap(middleware::AuthMw),
             )
             .route(
                 "/token/login",
-                web::post().to(Api::token).wrap(middleware::AuthMw),
+                web::post().to(UiApi::token).wrap(middleware::AuthMw),
             )
             .route(
                 "/token/refresh",
-                web::get().to(Api::token).wrap(middleware::AuthMw),
+                web::get().to(UiApi::token).wrap(middleware::AuthMw),
             )
             .route(
                 "/token/validate",
-                web::post().to(Api::validate_portal_token),
+                web::post().to(UiApi::validate_portal_token),
             )
             .route(
                 "/require-set-password",
-                web::get().to(Api::require_set_password),
+                web::get().to(UiApi::require_set_password),
             )
-            .route("/set-password", web::post().to(Api::set_password))
-            .route("/update-password", web::post().to(Api::update_password))
-            .route("/version", web::get().to(Api::version))
-            .route("/logout", web::post().to(Api::logout))
-            .route("/healthcheck", web::get().to(Api::healthcheck))
+            .route("/set-password", web::post().to(UiApi::set_password))
+            .route("/update-password", web::post().to(UiApi::update_password))
+            .route("/version", web::get().to(UiApi::version))
+            .route("/logout", web::post().to(UiApi::logout))
+            .route("/healthcheck", web::get().to(UiApi::healthcheck))
             .service(Files::new(
                 "/static",
                 std::fs::canonicalize("static").expect("static folder not found"),
             ))
-            .default_service(web::route().to(Api::index))
+            .default_service(web::route().to(UiApi::index))
     })
     .bind_rustls_0_23(format!("0.0.0.0:{ui_port}"), tls_config)
     .expect("bind_rustls")

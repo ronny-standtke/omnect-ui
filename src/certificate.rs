@@ -1,4 +1,9 @@
-use crate::{omnect_device_service_client::OmnectDeviceServiceClient, socket_client::SocketClient};
+#![cfg_attr(feature = "mock", allow(dead_code, unused_imports))]
+
+use crate::{
+    omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient},
+    socket_client::SocketClient,
+};
 use anyhow::{Context, Result};
 use log::info;
 use serde::{Deserialize, Serialize};
