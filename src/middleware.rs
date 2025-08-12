@@ -268,7 +268,7 @@ pub mod tests {
         .await
     }
 
-    async fn create_cookie_for_token(token: &str) -> Cookie {
+    async fn create_cookie_for_token(token: &str) -> Cookie<'_> {
         const SESSION_ID: &str = "omnect-ui-session";
         let token_name: String = "token".to_string();
 

@@ -249,7 +249,7 @@ where
 
         if let Err(e) = Self::store_or_update_password(&body.password) {
             error!("set_password() failed: {e:#}");
-            return HttpResponse::InternalServerError().body(format!("{:#}", e));
+            return HttpResponse::InternalServerError().body(format!("{e:#}"));
         }
 
         Self::session_token(session)
@@ -268,7 +268,7 @@ where
 
         if let Err(e) = Self::store_or_update_password(&body.password) {
             error!("update_password() failed: {e:#}");
-            return HttpResponse::InternalServerError().body(format!("{:#}", e));
+            return HttpResponse::InternalServerError().body(format!("{e:#}"));
         }
 
         session.purge();
