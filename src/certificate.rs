@@ -7,6 +7,7 @@ use crate::{
 use anyhow::{Context, Result};
 use log::info;
 use serde::{Deserialize, Serialize};
+use std::net::Ipv4Addr;
 use std::{fs::File, io::Write};
 
 #[derive(Serialize)]
@@ -41,12 +42,12 @@ pub fn key_path() -> String {
 }
 
 #[cfg(feature = "mock")]
-pub async fn create_module_certificate(ip: Option<String>) -> Result<()> {
+pub async fn create_module_certificate(ip: Option<Ipv4Addr>) -> Result<()> {
     Ok(())
 }
 
 #[cfg(not(feature = "mock"))]
-pub async fn create_module_certificate(ip: Option<String>) -> Result<()> {
+pub async fn create_module_certificate(ip: Option<Ipv4Addr>) -> Result<()> {
     info!("create module certificate");
     let ods_client = OmnectDeviceServiceClient::new(false).await?;
     let id = std::env::var("IOTEDGE_MODULEID").context("IOTEDGE_MODULEID missing")?;
@@ -56,7 +57,7 @@ pub async fn create_module_certificate(ip: Option<String>) -> Result<()> {
     let uri = std::env::var("IOTEDGE_WORKLOADURI").context("IOTEDGE_WORKLOADURI missing")?;
     let payload = CreateCertPayload {
         common_name: if let Some(ip) = &ip {
-            ip.clone()
+            ip.to_string()
         } else {
             ods_client.ip_address().await?
         },

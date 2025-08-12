@@ -68,6 +68,7 @@ uuid = { version = "1.17", default-features = false, features = [
   "v4",
 ] }
 actix-cors = { version = "0.7", default-features = false }
+serde_valid = { version = "1.0", default-features = false }
 
 [features]
 mock = ["dep:mockall"]

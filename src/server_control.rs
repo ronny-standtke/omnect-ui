@@ -1,4 +1,4 @@
-use log::info;
+use log::{error, info};
 use std::sync::Arc;
 use tokio::{
     sync::{RwLock, broadcast},
@@ -12,7 +12,9 @@ static ROLLBACK_TIMER: std::sync::OnceLock<Arc<RwLock<Option<AbortHandle>>>> =
 
 pub fn trigger_server_restart() {
     if let Some(tx) = SERVER_RESTART_TX.get() {
-        let _ = tx.send(());
+        if let Err(e) = tx.send(()) {
+            error!("Failed to trigger server restart: {e:#}");
+        }
     }
 }
 

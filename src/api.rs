@@ -19,13 +19,15 @@ use ini::Ini;
 use jwt_simple::prelude::*;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
+use serde_valid::Validate;
 use std::{
     fs::{self, File},
     io::Write,
+    net::Ipv4Addr,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration as StdDuration, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime},
 };
 use tokio::{task, time::sleep};
 
@@ -79,18 +81,21 @@ pub struct UpdatePasswordPayload {
     password: String,
 }
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkSetting {
     is_server_addr: bool,
     ip_changed: bool,
+    #[validate(min_length = 1)]
     name: String,
     dhcp: bool,
-    previous_ip: String,
-    ip: Option<String>,
+    previous_ip: Ipv4Addr,
+    ip: Option<Ipv4Addr>,
+    #[validate(maximum = 32)]
+    #[validate(minimum = 0)]
     netmask: Option<u8>,
-    gateway: Option<Vec<String>>,
-    dns: Option<Vec<String>>,
+    gateway: Option<Vec<Ipv4Addr>>,
+    dns: Option<Vec<Ipv4Addr>>,
 }
 
 #[derive(MultipartForm)]
@@ -113,7 +118,7 @@ where
 #[derive(Serialize, Deserialize, Clone)]
 struct PendingNetworkRollback {
     network_setting: NetworkSetting,
-    rollback_time: u64,
+    rollback_time: SystemTime,
 }
 
 impl<ServiceClient, SingleSignOn> Api<ServiceClient, SingleSignOn>
@@ -343,45 +348,21 @@ where
     }
 
     pub async fn set_network(
-        body: web::Json<NetworkSetting>,
+        network_settings: web::Json<NetworkSetting>,
         api: web::Data<Self>,
     ) -> impl Responder {
         debug!("set_network() called");
 
-        if body.name.is_empty() {
-            return HttpResponse::BadRequest().body("Network name cannot be empty");
+        if let Err(e) = network_settings.validate() {
+            error!("set_network() failed: {e:#}");
+            return HttpResponse::BadRequest().body(format!("{e:#}"));
         }
 
-        if let Some(ip) = &body.ip {
-            if !ip.is_empty() && ip.parse::<std::net::IpAddr>().is_err() {
-                return HttpResponse::BadRequest().body("Invalid IP address format");
-            }
-        }
-
-        if let Some(netmask) = &body.netmask {
-            if *netmask > 32 {
-                return HttpResponse::BadRequest().body("Netmask must be between 0 and 32");
-            }
-        }
-
-        if let Some(gateway) = &body.gateway {
-            for gw in gateway {
-                if !gw.is_empty() && gw.parse::<std::net::IpAddr>().is_err() {
-                    return HttpResponse::BadRequest().body("Invalid gateway format");
-                }
-            }
-        }
-
-        if let Some(dns) = &body.dns {
-            for dns_entry in dns {
-                if !dns_entry.is_empty() && dns_entry.parse::<std::net::IpAddr>().is_err() {
-                    return HttpResponse::BadRequest().body("Invalid DNS format");
-                }
-            }
-        }
-
-        if let Err(e) = api.configure_network_interface(body.clone()).await {
-            let _ = api.restore_network_setting(body.into_inner());
+        if let Err(e) = api
+            .configure_network_interface(network_settings.clone())
+            .await
+        {
+            let _ = api.restore_network_setting(network_settings.into_inner());
             error!("set_network() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{e:#}"));
         }
@@ -393,13 +374,13 @@ where
         let config_file = network_path!(format!("10-{}.network", network.name));
         let backup_file = network_path!(format!("10-{}.network.old", network.name));
 
-        if fs::exists(&config_file)? {
-            fs::remove_file(&config_file)?;
+        if !fs::exists(&backup_file)? {
+            return Ok(());
         }
 
-        if fs::exists(&backup_file)? {
-            fs::rename(backup_file, config_file)?;
-        }
+        fs::copy(&backup_file, &config_file).context("Failed to restore file")?;
+
+        let _ = fs::remove_file(&backup_file);
 
         Ok(())
     }
@@ -408,9 +389,9 @@ where
         &self,
         network: NetworkSetting,
     ) -> Result<()> {
-        let _ = self.restore_network_setting(network.clone());
-        let _ = self.service_client.reload_network().await;
-        let _ = certificate::create_module_certificate(Some(network.previous_ip)).await;
+        self.restore_network_setting(network.clone())?;
+        self.service_client.reload_network().await?;
+        certificate::create_module_certificate(Some(network.previous_ip)).await?;
         trigger_server_restart();
 
         Ok(())
@@ -420,12 +401,8 @@ where
         let config_file = network_path!(format!("10-{}.network", &network.name));
         let backup_file = network_path!(format!("10-{}.network.old", &network.name));
 
-        if Path::new(&backup_file).exists() {
-            fs::remove_file(&backup_file).context("Unable to remove backup file")?;
-        }
-
         if Path::new(&config_file).exists() {
-            fs::rename(config_file, backup_file).context("Failed to back up file")?;
+            fs::copy(config_file, backup_file).context("Failed to back up file")?;
         } else {
             let status = self.service_client.status().await?;
             let current_network = status
@@ -438,7 +415,7 @@ where
             let config_file = network_path!(Path::new(&current_network.file).file_name().unwrap());
 
             if Path::new(&config_file).exists() {
-                fs::rename(&config_file, backup_file)
+                fs::copy(&config_file, backup_file)
                     .context("Failed to back up current network file")?;
             }
         }
@@ -467,11 +444,7 @@ where
         &self,
         network: NetworkSetting,
     ) -> Result<()> {
-        let rollback_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            + 90; // 90 seconds from now
+        let rollback_time = SystemTime::now() + Duration::from_secs(90);
 
         let pending_rollback = PendingNetworkRollback {
             network_setting: network.clone(),
@@ -517,10 +490,7 @@ where
 
     pub async fn check_and_execute_pending_rollback(&self) -> Result<()> {
         if let Some(pending) = self.load_pending_rollback() {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+            let now = SystemTime::now();
 
             if now >= pending.rollback_time {
                 info!("Executing pending network rollback");
@@ -536,12 +506,12 @@ where
 
                 self.clear_pending_rollback();
             } else {
-                let remaining_time = pending.rollback_time - now;
+                let remaining_time = now.duration_since(pending.rollback_time).unwrap().as_secs();
                 let network_clone = pending.network_setting.clone();
                 let self_clone = self.clone();
 
                 task::spawn(async move {
-                    sleep(StdDuration::from_secs(remaining_time)).await;
+                    sleep(Duration::from_secs(remaining_time)).await;
 
                     if self_clone.load_pending_rollback().is_some() {
                         if let Err(e) = self_clone
@@ -592,22 +562,18 @@ where
 
         network_section.set(
             "Address",
-            format!(
-                "{}/{}",
-                network.ip.unwrap().as_str(),
-                network.netmask.unwrap()
-            ),
+            format!("{}/{}", network.ip.unwrap(), network.netmask.unwrap()),
         );
 
         if let Some(gateways) = network.gateway {
             for gateway in gateways {
-                network_section.add("Gateway", gateway);
+                network_section.add("Gateway", gateway.to_string());
             }
         }
 
         if let Some(dnss) = network.dns {
             for dns in dnss {
-                network_section.add("DNS", dns);
+                network_section.add("DNS", dns.to_string());
             }
         }
 
@@ -696,8 +662,10 @@ where
 
     fn session_token(session: Session) -> HttpResponse {
         let key = HS256Key::from_bytes(centrifugo_config().client_token.as_bytes());
-        let claims =
-            Claims::create(Duration::from_hours(TOKEN_EXPIRE_HOURS)).with_subject("omnect-ui");
+        let claims = Claims::create(jwt_simple::prelude::Duration::from_hours(
+            TOKEN_EXPIRE_HOURS,
+        ))
+        .with_subject("omnect-ui");
 
         let Ok(token) = key.authenticate(claims) else {
             error!("failed to create token");
