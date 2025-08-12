@@ -1,9 +1,10 @@
 use crate::{
     certificate,
     common::{centrifugo_config, config_path, validate_password},
-    keycloak_client,
+    keycloak_client::SingleSignOnProvider,
     middleware::TOKEN_EXPIRE_HOURS,
     omnect_device_service_client::*,
+    server_control::{cancel_rollback_timer, trigger_server_restart},
 };
 use actix_files::NamedFile;
 use actix_multipart::form::{MultipartForm, tempfile::TempFile};
@@ -98,8 +99,13 @@ pub struct UploadFormSingleFile {
 }
 
 #[derive(Clone)]
-pub struct Api {
-    pub ods_client: Arc<OmnectDeviceServiceClient>,
+pub struct Api<ServiceClient, SingleSignOn>
+where
+    ServiceClient: DeviceServiceClient,
+    SingleSignOn: SingleSignOnProvider,
+{
+    pub service_client: Arc<ServiceClient>,
+    pub single_sign_on: Arc<SingleSignOn>,
     pub index_html: PathBuf,
     pub tenant: String,
 }
@@ -110,25 +116,29 @@ struct PendingNetworkRollback {
     rollback_time: u64,
 }
 
-impl Api {
+impl<ServiceClient, SingleSignOn> Api<ServiceClient, SingleSignOn>
+where
+    ServiceClient: DeviceServiceClient,
+    SingleSignOn: SingleSignOnProvider,
+{
     const UPDATE_FILE_NAME: &str = "update.tar";
-    pub async fn new() -> Result<Self> {
+
+    pub async fn new(service_client: ServiceClient, single_sign_on: SingleSignOn) -> Result<Self> {
         let index_html =
             std::fs::canonicalize("static/index.html").context("static/index.html not found")?;
         let tenant = std::env::var("TENANT").unwrap_or("cp".to_string());
-        let ods_client = Arc::new(OmnectDeviceServiceClient::new(true).await?);
-
         Ok(Api {
-            ods_client,
+            service_client: Arc::new(service_client),
+            single_sign_on: Arc::new(single_sign_on),
             index_html,
             tenant,
         })
     }
 
-    pub async fn index(api: web::Data<Api>) -> actix_web::Result<NamedFile> {
+    pub async fn index(api: web::Data<Self>) -> actix_web::Result<NamedFile> {
         debug!("index() called");
 
-        if let Err(e) = api.ods_client.republish().await {
+        if let Err(e) = api.service_client.republish().await {
             error!("republish failed: {e:#}");
             return Err(actix_web::error::ErrorInternalServerError(
                 "republish failed",
@@ -142,10 +152,10 @@ impl Api {
         Ok(NamedFile::open(config_path!("app_config.js"))?)
     }
 
-    pub async fn healthcheck(api: web::Data<Api>) -> impl Responder {
+    pub async fn healthcheck(api: web::Data<Self>) -> impl Responder {
         debug!("healthcheck() called");
 
-        match api.ods_client.version_info().await {
+        match api.service_client.version_info().await {
             Ok(info) if info.mismatch => HttpResponse::ServiceUnavailable().json(&info),
             Ok(info) => HttpResponse::Ok().json(&info),
             Err(e) => {
@@ -157,12 +167,12 @@ impl Api {
 
     pub async fn factory_reset(
         body: web::Json<FactoryReset>,
-        api: web::Data<Api>,
+        api: web::Data<Self>,
         session: Session,
     ) -> impl Responder {
         debug!("factory_reset() called: {body:?}");
 
-        match api.ods_client.factory_reset(body.into_inner()).await {
+        match api.service_client.factory_reset(body.into_inner()).await {
             Ok(_) => {
                 session.purge();
                 HttpResponse::Ok().finish()
@@ -174,10 +184,10 @@ impl Api {
         }
     }
 
-    pub async fn reboot(api: web::Data<Api>) -> impl Responder {
+    pub async fn reboot(api: web::Data<Self>) -> impl Responder {
         debug!("reboot() called");
 
-        match api.ods_client.reboot().await {
+        match api.service_client.reboot().await {
             Ok(_) => HttpResponse::Ok().finish(),
             Err(e) => {
                 error!("reboot failed: {e:#}");
@@ -186,10 +196,10 @@ impl Api {
         }
     }
 
-    pub async fn reload_network(api: web::Data<Api>) -> impl Responder {
+    pub async fn reload_network(api: web::Data<Self>) -> impl Responder {
         debug!("reload_network() called");
 
-        match api.ods_client.reload_network().await {
+        match api.service_client.reload_network().await {
             Ok(_) => HttpResponse::Ok().finish(),
             Err(e) => {
                 error!("reload_network failed: {e:#}");
@@ -198,12 +208,12 @@ impl Api {
         }
     }
 
-    pub async fn token(session: Session, api: web::Data<Api>) -> impl Responder {
+    pub async fn token(session: Session, api: web::Data<Self>) -> impl Responder {
         debug!("token() called");
 
-        crate::cancel_rollback_timer().await;
+        cancel_rollback_timer().await;
         api.cancel_pending_rollback().await;
-        Api::session_token(session)
+        Self::session_token(session)
     }
 
     pub async fn logout(session: Session) -> impl Responder {
@@ -225,12 +235,12 @@ impl Api {
             return HttpResponse::BadRequest().body("update file is missing");
         };
 
-        let _ = Api::clear_data_folder();
+        let _ = Self::clear_data_folder();
 
-        if let Err(e) = Api::persist_uploaded_file(
+        if let Err(e) = Self::persist_uploaded_file(
             form.file,
             &tmp_path!(&filename),
-            &data_path!(&Api::UPDATE_FILE_NAME),
+            &data_path!(&Self::UPDATE_FILE_NAME),
         ) {
             error!("save_file() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{e}"));
@@ -239,13 +249,13 @@ impl Api {
         HttpResponse::Ok().finish()
     }
 
-    pub async fn load_update(api: web::Data<Api>) -> impl Responder {
+    pub async fn load_update(api: web::Data<Self>) -> impl Responder {
         debug!("load_update() called with path");
 
         match api
-            .ods_client
+            .service_client
             .load_update(LoadUpdate {
-                update_file_path: host_data_path!(&Api::UPDATE_FILE_NAME)
+                update_file_path: host_data_path!(&Self::UPDATE_FILE_NAME)
                     .display()
                     .to_string(),
             })
@@ -259,10 +269,10 @@ impl Api {
         }
     }
 
-    pub async fn run_update(body: web::Json<RunUpdate>, api: web::Data<Api>) -> impl Responder {
+    pub async fn run_update(body: web::Json<RunUpdate>, api: web::Data<Self>) -> impl Responder {
         debug!("run_update() called with validate_iothub_connection: {body:?}");
 
-        match api.ods_client.run_update(body.into_inner()).await {
+        match api.service_client.run_update(body.into_inner()).await {
             Ok(_) => HttpResponse::Ok().finish(),
             Err(e) => {
                 error!("run_update failed: {e:#}");
@@ -283,12 +293,12 @@ impl Api {
                 .finish();
         }
 
-        if let Err(e) = Api::store_or_update_password(&body.password) {
+        if let Err(e) = Self::store_or_update_password(&body.password) {
             error!("set_password() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{e:#}"));
         }
 
-        Api::session_token(session)
+        Self::session_token(session)
     }
 
     pub async fn update_password(
@@ -302,7 +312,7 @@ impl Api {
             return HttpResponse::BadRequest().body("current password is not correct");
         }
 
-        if let Err(e) = Api::store_or_update_password(&body.password) {
+        if let Err(e) = Self::store_or_update_password(&body.password) {
             error!("update_password() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{e:#}"));
         }
@@ -323,9 +333,8 @@ impl Api {
         HttpResponse::Ok().finish()
     }
 
-    pub async fn validate_portal_token(body: String, api: web::Data<Api>) -> impl Responder {
+    pub async fn validate_portal_token(body: String, api: web::Data<Self>) -> impl Responder {
         debug!("validate_portal_token() called");
-
         if let Err(e) = api.validate_token_and_claims(&body).await {
             error!("validate_portal_token() failed: {e:#}");
             return HttpResponse::Unauthorized().finish();
@@ -335,7 +344,7 @@ impl Api {
 
     pub async fn set_network(
         body: web::Json<NetworkSetting>,
-        api: web::Data<Api>,
+        api: web::Data<Self>,
     ) -> impl Responder {
         debug!("set_network() called");
 
@@ -400,9 +409,9 @@ impl Api {
         network: NetworkSetting,
     ) -> Result<()> {
         let _ = self.restore_network_setting(network.clone());
-        let _ = self.ods_client.reload_network().await;
+        let _ = self.service_client.reload_network().await;
         let _ = certificate::create_module_certificate(Some(network.previous_ip)).await;
-        crate::trigger_server_restart();
+        trigger_server_restart();
 
         Ok(())
     }
@@ -418,7 +427,7 @@ impl Api {
         if Path::new(&config_file).exists() {
             fs::rename(config_file, backup_file).context("Failed to back up file")?;
         } else {
-            let status = self.ods_client.status().await?;
+            let status = self.service_client.status().await?;
             let current_network = status
                 .network_status
                 .network_interfaces
@@ -440,10 +449,10 @@ impl Api {
             self.store_static_network_setting(network.clone())?;
         }
 
-        let ods_client = Arc::clone(&self.ods_client);
+        let service_client = Arc::clone(&self.service_client);
 
         task::spawn(async move {
-            let _ = ods_client.reload_network().await;
+            let _ = service_client.reload_network().await;
         });
 
         if network.is_server_addr && network.ip_changed {
@@ -482,7 +491,7 @@ impl Api {
 
             info!("Certificate updated with new IP. Restarting server...");
 
-            crate::trigger_server_restart();
+            trigger_server_restart();
         });
 
         Ok(())
@@ -608,47 +617,29 @@ impl Api {
     }
 
     async fn validate_token_and_claims(&self, token: &str) -> Result<()> {
-        let pub_key = keycloak_client::realm_public_key()
-            .await
-            .context("failed to get public key")?;
-
-        let claims = pub_key
-            .verify_token::<TokenClaims>(token, None)
-            .context("failed to verify token")?;
-
-        let Some(tenant_list) = &claims.custom.tenant_list else {
+        let claims = self.single_sign_on.verify_token(token).await?;
+        let Some(tenant_list) = &claims.tenant_list else {
             bail!("user has no tenant list");
         };
-
         if !tenant_list.contains(&self.tenant) {
             bail!("user has no permission to set password");
         }
-
-        let Some(roles) = &claims.custom.roles else {
+        let Some(roles) = &claims.roles else {
             bail!("user has no roles");
         };
-
         if roles.contains(&String::from("FleetAdministrator")) {
             return Ok(());
         }
-
         if roles.contains(&String::from("FleetOperator")) {
-            let Some(fleet_list) = &claims.custom.fleet_list else {
+            let Some(fleet_list) = &claims.fleet_list else {
                 bail!("user has no permission on this fleet");
             };
-
-            let fleet_id = self
-                .ods_client
-                .fleet_id()
-                .await
-                .context("failed to get fleet id")?;
-
+            let fleet_id = self.service_client.fleet_id().await?;
             if !fleet_list.contains(&fleet_id) {
                 bail!("user has no permission on this fleet");
             }
             return Ok(());
         }
-
         bail!("user has no permission to set password")
     }
 
@@ -696,7 +687,7 @@ impl Api {
         debug!("store_or_update_password() called");
 
         let password_file = config_path!("password");
-        let hash = Api::hash_password(password)?;
+        let hash = Self::hash_password(password)?;
         let mut file = File::create(&password_file).context("failed to create password file")?;
 
         file.write_all(hash.as_bytes())

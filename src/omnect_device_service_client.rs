@@ -1,6 +1,10 @@
+#![cfg_attr(feature = "mock", allow(dead_code, unused_imports))]
+
 use crate::{common::centrifugo_config, socket_client::SocketClient};
 use anyhow::{Context, Result, anyhow, bail};
 use hyperlocal::Uri;
+#[cfg(feature = "mock")]
+use mockall::automock;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -95,10 +99,35 @@ struct PublishIdEndpoint {
     endpoint: PublishEndpoint,
 }
 
+#[derive(Clone)]
 pub struct OmnectDeviceServiceClient {
     socket_client: SocketClient,
     socket_path: String,
     register_publish_endpoint: bool,
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[allow(async_fn_in_trait)]
+pub trait DeviceServiceClient {
+    async fn fleet_id(&self) -> Result<String>;
+
+    async fn ip_address(&self) -> Result<String>;
+
+    async fn status(&self) -> Result<Status>;
+
+    async fn republish(&self) -> Result<()>;
+
+    async fn factory_reset(&self, factory_reset: FactoryReset) -> Result<()>;
+
+    async fn reboot(&self) -> Result<()>;
+
+    async fn reload_network(&self) -> Result<()>;
+
+    async fn load_update(&self, load_update: LoadUpdate) -> Result<String>;
+
+    async fn run_update(&self, run_update: RunUpdate) -> Result<()>;
+
+    async fn version_info(&self) -> Result<VersionInfo>;
 }
 
 impl OmnectDeviceServiceClient {
@@ -118,97 +147,6 @@ impl OmnectDeviceServiceClient {
             client.register_publish_endpoint().await?;
         }
         Ok(client)
-    }
-
-    pub async fn fleet_id(&self) -> Result<String> {
-        let status = self.status().await?;
-
-        let Some(fleet_id) = status.system_info.fleet_id else {
-            bail!("failed to get fleet id from status")
-        };
-
-        Ok(fleet_id)
-    }
-
-    pub async fn ip_address(&self) -> Result<String> {
-        // we return the first online ipv4 address that was found
-        self.status()
-            .await?
-            .network_status
-            .network_interfaces
-            .iter()
-            .filter_map(|iface| {
-                if iface.online {
-                    if let Some(addr_info) = iface.ipv4.addrs.first() {
-                        return Some(addr_info.addr.clone());
-                    }
-                }
-                None
-            })
-            .next()
-            .context("failed to get ip address from status")
-    }
-
-    pub async fn status(&self) -> Result<Status> {
-        serde_json::from_str(
-            &self
-                .socket_client
-                .get_with_empty_body(&Uri::new(&self.socket_path, "/status/v1").into())
-                .await?,
-        )
-        .context("failed to parse status")
-    }
-
-    pub async fn republish(&self) -> Result<()> {
-        self.post_with_empty_body(concat!("/republish/v1/", env!("CARGO_PKG_NAME")))
-            .await
-            .map(|_| ())
-    }
-
-    pub async fn factory_reset(&self, factory_reset: FactoryReset) -> Result<()> {
-        self.post_with_json_body("/factory-reset/v1", factory_reset)
-            .await
-            .map(|_| ())
-    }
-
-    pub async fn reboot(&self) -> Result<()> {
-        self.post_with_empty_body("/reboot/v1").await.map(|_| ())
-    }
-
-    pub async fn reload_network(&self) -> Result<()> {
-        self.post_with_empty_body("/reload-network/v1")
-            .await
-            .map(|_| ())
-    }
-
-    pub async fn load_update(&self, load_update: LoadUpdate) -> Result<String> {
-        self.post_with_json_body("/fwupdate/load/v1", load_update)
-            .await
-    }
-
-    pub async fn run_update(&self, run_update: RunUpdate) -> Result<()> {
-        self.post_with_json_body("/fwupdate/run/v1", run_update)
-            .await
-            .map(|_| ())
-    }
-
-    pub async fn version_info(&self) -> Result<VersionInfo> {
-        let current = self
-            .status()
-            .await?
-            .system_info
-            .omnect_device_service_version;
-
-        let required = VersionReq::parse(Self::REQUIRED_CLIENT_VERSION)
-            .map_err(|e| anyhow!("failed to parse required version: {e}"))?;
-        let current = Version::parse(&current)
-            .map_err(|e| anyhow!("failed to parse current version: {e}"))?;
-
-        Ok(VersionInfo {
-            required: required.to_string(),
-            current: current.to_string(),
-            mismatch: !required.matches(&current),
-        })
     }
 
     async fn register_publish_endpoint(&self) -> Result<()> {
@@ -248,6 +186,97 @@ impl OmnectDeviceServiceClient {
         self.socket_client
             .post_with_json_body(&Uri::new(&self.socket_path, path).into(), body)
             .await
+    }
+}
+
+impl DeviceServiceClient for OmnectDeviceServiceClient {
+    async fn fleet_id(&self) -> Result<String> {
+        let status = self.status().await?;
+
+        let Some(fleet_id) = status.system_info.fleet_id else {
+            bail!("failed to get fleet id from status")
+        };
+
+        Ok(fleet_id)
+    }
+
+    async fn ip_address(&self) -> Result<String> {
+        // we return the first online ipv4 address that was found
+        self.status()
+            .await?
+            .network_status
+            .network_interfaces
+            .iter()
+            .filter_map(|iface| {
+                if iface.online
+                    && let Some(addr_info) = iface.ipv4.addrs.first()
+                {
+                    return Some(addr_info.addr.clone());
+                }
+                None
+            })
+            .next()
+            .context("failed to get ip address from status")
+    }
+
+    async fn status(&self) -> Result<Status> {
+        let body = self
+            .socket_client
+            .get_with_empty_body(&Uri::new(&self.socket_path, "/status/v1").into())
+            .await?;
+        serde_json::from_str(&body).context("failed to parse status")
+    }
+
+    async fn republish(&self) -> Result<()> {
+        self.post_with_empty_body(concat!("/republish/v1/", env!("CARGO_PKG_NAME")))
+            .await
+            .map(|_| ())
+    }
+
+    async fn factory_reset(&self, factory_reset: FactoryReset) -> Result<()> {
+        self.post_with_json_body("/factory-reset/v1", factory_reset)
+            .await
+            .map(|_| ())
+    }
+
+    async fn reboot(&self) -> Result<()> {
+        self.post_with_empty_body("/reboot/v1").await.map(|_| ())
+    }
+
+    async fn reload_network(&self) -> Result<()> {
+        self.post_with_empty_body("/reload-network/v1")
+            .await
+            .map(|_| ())
+    }
+
+    async fn load_update(&self, load_update: LoadUpdate) -> Result<String> {
+        self.post_with_json_body("/fwupdate/load/v1", load_update)
+            .await
+    }
+
+    async fn run_update(&self, run_update: RunUpdate) -> Result<()> {
+        self.post_with_json_body("/fwupdate/run/v1", run_update)
+            .await
+            .map(|_| ())
+    }
+
+    async fn version_info(&self) -> Result<VersionInfo> {
+        let current = self
+            .status()
+            .await?
+            .system_info
+            .omnect_device_service_version;
+
+        let required = VersionReq::parse(Self::REQUIRED_CLIENT_VERSION)
+            .map_err(|e| anyhow!("failed to parse required version: {e}"))?;
+        let current = Version::parse(&current)
+            .map_err(|e| anyhow!("failed to parse current version: {e}"))?;
+
+        Ok(VersionInfo {
+            required: required.to_string(),
+            current: current.to_string(),
+            mismatch: !required.matches(&current),
+        })
     }
 }
 

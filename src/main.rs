@@ -4,9 +4,15 @@ mod common;
 mod keycloak_client;
 mod middleware;
 mod omnect_device_service_client;
+mod server_control;
 mod socket_client;
-
-use crate::{api::Api, certificate::create_module_certificate};
+use crate::{
+    api::Api,
+    certificate::create_module_certificate,
+    keycloak_client::KeycloakProvider,
+    omnect_device_service_client::OmnectDeviceServiceClient,
+    server_control::{set_rollback_timer_handle, set_server_restart_tx},
+};
 use actix_cors::Cors;
 use actix_files::Files;
 use actix_multipart::form::MultipartFormConfig;
@@ -31,39 +37,10 @@ use tokio::{
     process::{Child, Command},
     signal::unix::{SignalKind, signal},
     sync::{RwLock, broadcast},
-    task::AbortHandle,
 };
 
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
-
-// Global server restart signal
-static SERVER_RESTART_TX: std::sync::OnceLock<broadcast::Sender<()>> = std::sync::OnceLock::new();
-
-// Global rollback timer handle
-static ROLLBACK_TIMER: std::sync::OnceLock<Arc<RwLock<Option<AbortHandle>>>> =
-    std::sync::OnceLock::new();
-
-pub fn trigger_server_restart() {
-    if let Some(tx) = SERVER_RESTART_TX.get() {
-        let _ = tx.send(());
-    }
-}
-
-pub async fn cancel_rollback_timer() {
-    if let Some(timer_handle) = ROLLBACK_TIMER.get() {
-        if let Some(handle) = timer_handle.write().await.take() {
-            handle.abort();
-            info!("Rollback timer cancelled - network change confirmed");
-        }
-    }
-}
-
-pub async fn set_rollback_timer(handle: AbortHandle) {
-    if let Some(timer_handle) = ROLLBACK_TIMER.get() {
-        *timer_handle.write().await = Some(handle);
-    }
-}
 
 #[actix_web::main]
 async fn main() {
@@ -99,14 +76,10 @@ async fn main() {
 
     // Create restart signal channel
     let (restart_tx, mut restart_rx) = broadcast::channel(1);
-    SERVER_RESTART_TX
-        .set(restart_tx)
-        .expect("Failed to set restart channel");
+    set_server_restart_tx(restart_tx).expect("Failed to set restart channel");
 
     // Initialize rollback timer handle
-    ROLLBACK_TIMER
-        .set(Arc::new(RwLock::new(None)))
-        .expect("Failed to set rollback timer");
+    set_rollback_timer_handle(Arc::new(RwLock::new(None))).expect("Failed to set rollback timer");
 
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
 
@@ -168,7 +141,16 @@ async fn run_server() -> (
 
     common::create_frontend_config_file().expect("failed to create frontend config file");
 
-    let api = Api::new().await.expect("failed to create api");
+    type UiApi = Api<OmnectDeviceServiceClient, KeycloakProvider>;
+
+    let api = UiApi::new(
+        OmnectDeviceServiceClient::new(true)
+            .await
+            .expect("failed to create client to device service"),
+        Default::default(),
+    )
+    .await
+    .expect("failed to create api");
 
     if let Err(e) = api.check_and_execute_pending_rollback().await {
         error!("Failed to check pending rollback: {e:#}");
@@ -234,59 +216,63 @@ async fn run_server() -> (
                     .memory_limit(MEMORY_LIMIT_BYTES),
             )
             .app_data(Data::new(api.clone()))
-            .route("/", web::get().to(Api::index))
-            .route("/config.js", web::get().to(Api::config))
+            .route("/", web::get().to(UiApi::index))
+            .route("/config.js", web::get().to(UiApi::config))
             .route(
                 "/factory-reset",
-                web::post().to(Api::factory_reset).wrap(middleware::AuthMw),
+                web::post()
+                    .to(UiApi::factory_reset)
+                    .wrap(middleware::AuthMw),
             )
             .route(
                 "/reboot",
-                web::post().to(Api::reboot).wrap(middleware::AuthMw),
+                web::post().to(UiApi::reboot).wrap(middleware::AuthMw),
             )
             .route(
                 "/reload-network",
-                web::post().to(Api::reload_network).wrap(middleware::AuthMw),
+                web::post()
+                    .to(UiApi::reload_network)
+                    .wrap(middleware::AuthMw),
             )
             .route(
                 "/update/file",
-                web::post().to(Api::save_file).wrap(middleware::AuthMw),
+                web::post().to(UiApi::save_file).wrap(middleware::AuthMw),
             )
             .route(
                 "/update/load",
-                web::post().to(Api::load_update).wrap(middleware::AuthMw),
+                web::post().to(UiApi::load_update).wrap(middleware::AuthMw),
             )
             .route(
                 "/update/run",
-                web::post().to(Api::run_update).wrap(middleware::AuthMw),
+                web::post().to(UiApi::run_update).wrap(middleware::AuthMw),
             )
             .route(
                 "/token/login",
-                web::post().to(Api::token).wrap(middleware::AuthMw),
+                web::post().to(UiApi::token).wrap(middleware::AuthMw),
             )
             .route(
                 "/token/refresh",
-                web::get().to(Api::token).wrap(middleware::AuthMw),
+                web::get().to(UiApi::token).wrap(middleware::AuthMw),
             )
             .route(
                 "/token/validate",
-                web::post().to(Api::validate_portal_token),
+                web::post().to(UiApi::validate_portal_token),
             )
             .route(
                 "/require-set-password",
-                web::get().to(Api::require_set_password),
+                web::get().to(UiApi::require_set_password),
             )
-            .route("/set-password", web::post().to(Api::set_password))
-            .route("/update-password", web::post().to(Api::update_password))
-            .route("/version", web::get().to(Api::version))
-            .route("/logout", web::post().to(Api::logout))
-            .route("/healthcheck", web::get().to(Api::healthcheck))
-            .route("/network", web::post().to(Api::set_network))
+            .route("/set-password", web::post().to(UiApi::set_password))
+            .route("/update-password", web::post().to(UiApi::update_password))
+            .route("/version", web::get().to(UiApi::version))
+            .route("/logout", web::post().to(UiApi::logout))
+            .route("/healthcheck", web::get().to(UiApi::healthcheck))
+            .route("/network", web::post().to(UiApi::set_network))
             .service(Files::new(
                 "/static",
                 std::fs::canonicalize("static").expect("static folder not found"),
             ))
-            .default_service(web::route().to(Api::index))
+            .default_service(web::route().to(UiApi::index))
     })
     .bind_rustls_0_23(format!("0.0.0.0:{ui_port}"), tls_config)
     .expect("bind_rustls")

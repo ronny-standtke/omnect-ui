@@ -1,7 +1,6 @@
 use crate::keycloak_client;
 use anyhow::{Context, Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use serde::{Deserialize, Serialize};
 use std::{env::var, io::Write, sync::OnceLock};
 use uuid::Uuid;
 
@@ -28,12 +27,6 @@ pub fn centrifugo_config() -> CentrifugoConfig {
             }
         })
         .clone()
-}
-
-#[derive(Serialize, Deserialize)]
-struct FrontEndConfig {
-    #[serde(rename = "KEYCLOAK_URL")]
-    keycloak_url: String,
 }
 
 macro_rules! config_path {

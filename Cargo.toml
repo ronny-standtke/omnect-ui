@@ -41,6 +41,7 @@ log = { version = "0.4", default-features = false }
 log-panics = { version = "2.1", default-features = false, features = [
   "with-backtrace",
 ] }
+mockall = { version = "0.13", optional = true, default-features = false }
 rand_core = { version = "0.9", default-features = false, features = ["std"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rust-ini = { version = "0.21", default-features = false }
@@ -69,9 +70,10 @@ uuid = { version = "1.17", default-features = false, features = [
 actix-cors = { version = "0.7", default-features = false }
 
 [features]
-mock = []
+mock = ["dep:mockall"]
 
 [dev-dependencies]
 actix-http = "3.11"
 actix-service = "2.0"
-tempfile = "3.20.0"
+tempfile = "3.20"
+mockall_double = "0.3"
