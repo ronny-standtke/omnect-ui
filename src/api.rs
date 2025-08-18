@@ -358,11 +358,8 @@ where
             return HttpResponse::BadRequest().body(format!("{e:#}"));
         }
 
-        if let Err(e) = api
-            .configure_network_interface(network_settings.clone())
-            .await
-        {
-            let _ = api.restore_network_setting(network_settings.into_inner());
+        if let Err(e) = api.configure_network_interface(&network_settings).await {
+            let _ = api.restore_network_setting(&network_settings);
             error!("set_network() failed: {e:#}");
             return HttpResponse::InternalServerError().body(format!("{e:#}"));
         }
@@ -370,7 +367,7 @@ where
         HttpResponse::Ok().finish()
     }
 
-    fn restore_network_setting(&self, network: NetworkSetting) -> Result<()> {
+    fn restore_network_setting(&self, network: &NetworkSetting) -> Result<()> {
         let config_file = network_path!(format!("10-{}.network", network.name));
         let backup_file = network_path!(format!("10-{}.network.old", network.name));
 
@@ -387,9 +384,9 @@ where
 
     async fn restore_network_setting_and_reset_certificate(
         &self,
-        network: NetworkSetting,
+        network: &NetworkSetting,
     ) -> Result<()> {
-        self.restore_network_setting(network.clone())?;
+        self.restore_network_setting(network)?;
         self.service_client.reload_network().await?;
         certificate::create_module_certificate(Some(network.previous_ip)).await?;
         trigger_server_restart();
@@ -397,7 +394,7 @@ where
         Ok(())
     }
 
-    async fn configure_network_interface(&self, network: NetworkSetting) -> Result<()> {
+    async fn configure_network_interface(&self, network: &NetworkSetting) -> Result<()> {
         let config_file = network_path!(format!("10-{}.network", &network.name));
         let backup_file = network_path!(format!("10-{}.network.old", &network.name));
 
@@ -451,7 +448,7 @@ where
 
     async fn handle_server_restart_with_new_certificate(
         &self,
-        network: NetworkSetting,
+        network: &NetworkSetting,
     ) -> Result<()> {
         let rollback_time = SystemTime::now() + Duration::from_secs(90);
 
@@ -464,14 +461,20 @@ where
             error!("Failed to save pending rollback: {e:#}");
         }
 
+        let network_clone = network.clone();
+
         task::spawn(async move {
-            if let Err(e) = certificate::create_module_certificate(Some(network.ip.unwrap())).await
-            {
-                error!("Failed to create certificate with new IP: {e:#}");
+            let ip = if network_clone.dhcp {
+                None
+            } else {
+                Some(network_clone.ip.unwrap())
+            };
+
+            if let Err(e) = certificate::create_module_certificate(ip).await {
+                error!("Failed to create certificate with new IP address: {e:#}");
                 return;
             }
-
-            info!("Certificate updated with new IP. Restarting server...");
+            info!("Certificate updated with new IP address. Restarting server...");
 
             trigger_server_restart();
         });
@@ -505,7 +508,7 @@ where
                 info!("Executing pending network rollback");
 
                 if let Err(e) = self
-                    .restore_network_setting_and_reset_certificate(pending.network_setting)
+                    .restore_network_setting_and_reset_certificate(&pending.network_setting)
                     .await
                 {
                     error!("Failed to execute pending rollback: {e:#}");
@@ -521,7 +524,7 @@ where
 
                 if self.load_pending_rollback().is_some() {
                     if let Err(e) = self
-                        .restore_network_setting_and_reset_certificate(network_clone)
+                        .restore_network_setting_and_reset_certificate(&network_clone)
                         .await
                     {
                         error!("Failed to execute scheduled rollback: {e:#}");
