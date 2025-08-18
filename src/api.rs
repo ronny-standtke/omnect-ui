@@ -106,7 +106,7 @@ pub struct UploadFormSingleFile {
 #[derive(Clone)]
 pub struct Api<ServiceClient, SingleSignOn>
 where
-    ServiceClient: DeviceServiceClient,
+    ServiceClient: DeviceServiceClient + Send + Sync + 'static,
     SingleSignOn: SingleSignOnProvider,
 {
     pub service_client: Arc<ServiceClient>,
@@ -123,7 +123,7 @@ struct PendingNetworkRollback {
 
 impl<ServiceClient, SingleSignOn> Api<ServiceClient, SingleSignOn>
 where
-    ServiceClient: DeviceServiceClient,
+    ServiceClient: DeviceServiceClient + Send + Sync + 'static,
     SingleSignOn: SingleSignOnProvider,
 {
     const UPDATE_FILE_NAME: &str = "update.tar";
@@ -401,10 +401,15 @@ where
         let config_file = network_path!(format!("10-{}.network", &network.name));
         let backup_file = network_path!(format!("10-{}.network.old", &network.name));
 
-        if Path::new(&config_file).exists() {
+        if let Ok(true) = fs::exists(&config_file) {
             fs::copy(config_file, backup_file).context("Failed to back up file")?;
         } else {
-            let status = self.service_client.status().await?;
+            let status = self
+                .service_client
+                .status()
+                .await
+                .context("Failed to get status")?;
+
             let current_network = status
                 .network_status
                 .network_interfaces
@@ -412,11 +417,15 @@ where
                 .find(|iface| iface.name == network.name)
                 .context("Failed to find current network interface")?;
 
-            let config_file = network_path!(Path::new(&current_network.file).file_name().unwrap());
+            debug!("Current network file is {}", current_network.file);
 
-            if Path::new(&config_file).exists() {
-                fs::copy(&config_file, backup_file)
-                    .context("Failed to back up current network file")?;
+            if let Some(current_network_file) = Path::new(&current_network.file).file_name() {
+                let config_file = network_path!(current_network_file);
+                debug!("Config file is {:?}", &config_file);
+                if let Ok(true) = fs::exists(&config_file) {
+                    fs::copy(&config_file, backup_file)
+                        .context("Failed to back up current network file")?;
+                }
             }
         }
 
@@ -505,26 +514,22 @@ where
                 }
 
                 self.clear_pending_rollback();
-            } else {
-                let remaining_time = now.duration_since(pending.rollback_time).unwrap().as_secs();
+            } else if let Ok(remaining_time) = pending.rollback_time.duration_since(now) {
                 let network_clone = pending.network_setting.clone();
-                let self_clone = self.clone();
 
-                task::spawn(async move {
-                    sleep(Duration::from_secs(remaining_time)).await;
+                sleep(Duration::from_secs(remaining_time.as_secs())).await;
 
-                    if self_clone.load_pending_rollback().is_some() {
-                        if let Err(e) = self_clone
-                            .restore_network_setting_and_reset_certificate(network_clone)
-                            .await
-                        {
-                            error!("Failed to execute scheduled rollback: {e:#}");
-                        } else {
-                            info!("Scheduled network rollback executed successfully");
-                        }
-                        self_clone.clear_pending_rollback();
+                if self.load_pending_rollback().is_some() {
+                    if let Err(e) = self
+                        .restore_network_setting_and_reset_certificate(network_clone)
+                        .await
+                    {
+                        error!("Failed to execute scheduled rollback: {e:#}");
+                    } else {
+                        info!("Scheduled network rollback executed successfully");
                     }
-                });
+                    self.clear_pending_rollback();
+                }
             }
         }
         Ok(())
@@ -547,7 +552,7 @@ where
             .set("DHCP", "yes");
 
         ini.write_to_file(network_path!(format!("10-{}.network", &network.name)))
-            .context("Failed to save new config file")?;
+            .context("Failed to write dhcp network config file")?;
 
         Ok(())
     }
@@ -577,7 +582,8 @@ where
             }
         }
 
-        ini.write_to_file(network_path!(format!("10-{}.network", network.name)))?;
+        ini.write_to_file(network_path!(format!("10-{}.network", network.name)))
+            .context("Failed to write static network config file")?;
 
         Ok(())
     }

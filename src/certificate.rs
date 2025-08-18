@@ -42,7 +42,7 @@ pub fn key_path() -> String {
 }
 
 #[cfg(feature = "mock")]
-pub async fn create_module_certificate(ip: Option<Ipv4Addr>) -> Result<()> {
+pub async fn create_module_certificate(_ip: Option<Ipv4Addr>) -> Result<()> {
     Ok(())
 }
 

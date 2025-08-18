@@ -121,7 +121,7 @@ pub trait DeviceServiceClient {
 
     async fn reboot(&self) -> Result<()>;
 
-    async fn reload_network(&self) -> Result<()>;
+    fn reload_network(&self) -> impl std::future::Future<Output = Result<()>> + Send;
 
     async fn load_update(&self, load_update: LoadUpdate) -> Result<String>;
 
@@ -208,10 +208,10 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
             .network_interfaces
             .iter()
             .filter_map(|iface| {
-                if iface.online
-                    && let Some(addr_info) = iface.ipv4.addrs.first()
-                {
-                    return Some(addr_info.addr.clone());
+                if iface.online {
+                    if let Some(addr_info) = iface.ipv4.addrs.first() {
+                        return Some(addr_info.addr.clone());
+                    }
                 }
                 None
             })

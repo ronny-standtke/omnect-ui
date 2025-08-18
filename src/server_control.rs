@@ -27,12 +27,6 @@ pub async fn cancel_rollback_timer() {
     }
 }
 
-pub async fn set_rollback_timer(handle: AbortHandle) {
-    if let Some(timer_handle) = ROLLBACK_TIMER.get() {
-        *timer_handle.write().await = Some(handle);
-    }
-}
-
 pub fn set_server_restart_tx(tx: broadcast::Sender<()>) -> Result<(), broadcast::Sender<()>> {
     SERVER_RESTART_TX.set(tx)
 }

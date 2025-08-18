@@ -152,9 +152,13 @@ async fn run_server() -> (
     .await
     .expect("failed to create api");
 
-    if let Err(e) = api.check_and_execute_pending_rollback().await {
-        error!("Failed to check pending rollback: {e:#}");
-    }
+    let api_clone = api.clone();
+
+    tokio::spawn(async move {
+        if let Err(e) = api_clone.check_and_execute_pending_rollback().await {
+            error!("Failed to check pending rollback: {e:#}");
+        }
+    });
 
     let mut tls_certs = std::io::BufReader::new(
         std::fs::File::open(certificate::cert_path()).expect("read certs_file"),
