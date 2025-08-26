@@ -1,20 +1,20 @@
-# omnect-ui
+# omnect UI
 
 Product page: <www.omnect.io>
 
-This module implements a web frontend and backend to provide omnect specific features in a local environment, where the device might not be connected to the azure cloud. In that case the device cannot be remotely controlled by [omnect-portal](https://cp.omnect.conplement.cloud/) and omnect-ui might be the alternative.
+This module implements a web frontend and backend to provide omnect specific features in a local environment, where the device might not be connected to the azure cloud. In that case the device cannot be remotely controlled by [omnect-portal](https://cp.omnect.conplement.cloud/) and omnect UI might be the alternative.
 
-## Install omnect-ui
+## Install omnect UI
 
-Since omnect-os is designed as generic OS, all specific or optional applications must be provided as docker images via azure iotedge deployment:
+Since omnect secure OS is designed as generic OS, all specific or optional applications must be provided as docker images via azure iotedge deployment:
 
-- deployment of omnect-ui docker image via omnect-portal to a device in field
+- deployment of omnect UI docker image via omnect-portal to a device in field
 - device must be online (at least once) in order to receive the deployment and to set initial password
-- after a factory reset omnect-ui must be deployed again what requires a connection to azure cloud
+- after a factory reset omnect UI must be deployed again what requires a connection to azure cloud
 
-## Access omnect-ui
+## Access omnect UI
 
-omnect-ui can be reached at <https://DeviceIp:1977><br>
+omnect UI can be reached at <https://DeviceIp:1977><br>
 
 Login with the configured password<br>
 ![login](docu/login.png)<br>

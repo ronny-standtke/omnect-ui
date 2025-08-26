@@ -42,6 +42,13 @@ pub struct Status {
     pub network_status: NetworkStatus,
     #[serde(rename = "SystemInfo")]
     pub system_info: SystemInfo,
+    #[serde(rename = "UpdateValidationStatus")]
+    pub update_validation_status: UpdateValidationStatus,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct UpdateValidationStatus {
+    pub status: String,
 }
 
 #[derive(Deserialize)]
@@ -79,6 +86,12 @@ pub struct VersionInfo {
     pub required: String,
     pub current: String,
     pub mismatch: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct HealthcheckInfo {
+    pub version_info: VersionInfo,
+    pub update_validation_status: UpdateValidationStatus,
 }
 
 #[derive(Serialize)]
@@ -127,7 +140,7 @@ pub trait DeviceServiceClient {
 
     async fn run_update(&self, run_update: RunUpdate) -> Result<()>;
 
-    async fn version_info(&self) -> Result<VersionInfo>;
+    async fn healthcheck_info(&self) -> Result<HealthcheckInfo>;
 }
 
 impl OmnectDeviceServiceClient {
@@ -260,22 +273,22 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
             .map(|_| ())
     }
 
-    async fn version_info(&self) -> Result<VersionInfo> {
-        let current = self
-            .status()
-            .await?
-            .system_info
-            .omnect_device_service_version;
+    async fn healthcheck_info(&self) -> Result<HealthcheckInfo> {
+        let status = self.status().await?;
+        let current_version = status.system_info.omnect_device_service_version;
 
-        let required = VersionReq::parse(Self::REQUIRED_CLIENT_VERSION)
+        let required_version = VersionReq::parse(Self::REQUIRED_CLIENT_VERSION)
             .map_err(|e| anyhow!("failed to parse required version: {e}"))?;
-        let current = Version::parse(&current)
+        let current_version = Version::parse(&current_version)
             .map_err(|e| anyhow!("failed to parse current version: {e}"))?;
 
-        Ok(VersionInfo {
-            required: required.to_string(),
-            current: current.to_string(),
-            mismatch: !required.matches(&current),
+        Ok(HealthcheckInfo {
+            version_info: VersionInfo {
+                required: Self::REQUIRED_CLIENT_VERSION.to_string(),
+                current: current_version.to_string(),
+                mismatch: !required_version.matches(&current_version),
+            },
+            update_validation_status: status.update_validation_status,
         })
     }
 }

@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { useFetch } from "@vueuse/core"
 import { ref, toRef } from "vue"
+import { useAwaitUpdate } from "../composables/useAwaitUpdate"
 import { useOverlaySpinner } from "../composables/useOverlaySpinner"
 import { useSnackbar } from "../composables/useSnackbar"
-import { useWaitReconnect } from "../composables/useWaitReconnect"
 import router from "../plugins/router"
 import type { UpdateManifest } from "../types/update-manifest"
 import KeyValuePair from "./ui-components/KeyValuePair.vue"
 
 const { showError: snackbarShowError } = useSnackbar()
 const { overlaySpinnerState, reset: resetOverlay } = useOverlaySpinner()
-const { startWaitReconnect, stopWaitReconnect } = useWaitReconnect()
+const { startWaitReconnect, stopWaitReconnect } = useAwaitUpdate()
 
 const props = defineProps<{
 	updateManifest: UpdateManifest | undefined
@@ -71,9 +71,9 @@ const toggleEnforceConnect = (v: boolean | null) => {
 		</div>
 		<dl v-if="updateManifest" class="grid grid-cols-[1fr_3fr] gap-x-64 gap-y-8">
 			<KeyValuePair title="Provider">{{ updateManifest.updateId.provider }}</KeyValuePair>
-			<KeyValuePair title="Variant">{{ updateManifest.updateId.name }}</KeyValuePair>
-			<KeyValuePair title="Current version">{{ props.currentVersion }}</KeyValuePair>
-			<KeyValuePair title="Update version">{{ updateManifest.updateId.version }}</KeyValuePair>
+			<KeyValuePair title="omnect Secure OS variant">{{ updateManifest.updateId.name }}</KeyValuePair>
+			<KeyValuePair title="Current omnect Secure OS version">{{ props.currentVersion }}</KeyValuePair>
+			<KeyValuePair title="Update omnect Secure OS version">{{ updateManifest.updateId.version }}</KeyValuePair>
 			<KeyValuePair title="Manufacturer">{{ updateManifest.compatibility[0].manufacturer }}</KeyValuePair>
 			<KeyValuePair title="Model">{{ updateManifest.compatibility[0].model }}</KeyValuePair>
 			<KeyValuePair title="Compatibility Id">{{ updateManifest.compatibility[0].compatibilityid }}</KeyValuePair>
