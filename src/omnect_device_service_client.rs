@@ -219,10 +219,10 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
             .network_interfaces
             .iter()
             .filter_map(|iface| {
-                if iface.online {
-                    if let Some(addr_info) = iface.ipv4.addrs.first() {
-                        return Some(addr_info.addr.clone());
-                    }
+                if iface.online
+                    && let Some(addr_info) = iface.ipv4.addrs.first()
+                {
+                    return Some(addr_info.addr.clone());
                 }
                 None
             })
