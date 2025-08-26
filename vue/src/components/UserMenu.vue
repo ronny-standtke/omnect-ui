@@ -31,7 +31,7 @@ const logOut = async () => {
 			</picture>
 		</template>
 
-		<v-card title="omnect-ui">
+		<v-card title="omnect UI">
 			<v-card-text class="mt-2">
 				<div class="flex justify-space-between items-center">
 					<v-btn type="button" text="Change password" prepend-icon="mdi-lock-outline" variant="text"

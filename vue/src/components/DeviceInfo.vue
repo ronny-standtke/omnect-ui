@@ -15,60 +15,60 @@ const updateStatus: Ref<string> = ref("")
 const factoryResetStatus = computed(() => factoryResetResult?.value?.status ?? FactoryResetStatus.Unknown)
 
 const deviceInfo: Ref<Map<string, string | number>> = computed(
-	() =>
-		new Map([
-			["omnect Cloud Connection", online.value ? "connected" : "disconnected"],
-			["OS name", systemInfo.value?.os.name ?? "n/a"],
-			["Boot time", systemInfo.value?.boot_time ? new Date(systemInfo.value?.boot_time).toLocaleString() : "n/a"],
-			["OS version", String(systemInfo.value?.os.version) ?? "n/a"],
-			["Wait online timeout (in seconds)", timeouts.value?.wait_online_timeout.secs ?? "n/a"],
-			["omnect device service version", systemInfo.value?.omnect_device_service_version ?? "n/a"],
-			["Azure SDK version", systemInfo.value?.azure_sdk_version ?? "n/a"],
-			["Update status", updateStatus.value]
-		])
+  () =>
+    new Map([
+      ["omnect Cloud Connection", online.value ? "connected" : "disconnected"],
+      ["omnect Secure OS variant", systemInfo.value?.os.name ?? "n/a"],
+      ["Boot time", systemInfo.value?.boot_time ? new Date(systemInfo.value?.boot_time).toLocaleString() : "n/a"],
+      ["omnect Secure OS version", String(systemInfo.value?.os.version) ?? "n/a"],
+      ["Wait online timeout (in seconds)", timeouts.value?.wait_online_timeout.secs ?? "n/a"],
+      ["omnect device service version", systemInfo.value?.omnect_device_service_version ?? "n/a"],
+      ["Azure SDK version", systemInfo.value?.azure_sdk_version ?? "n/a"],
+      ["Update status", updateStatus.value]
+    ])
 )
 
 const updateOnlineStatus = (data: OnlineStatus) => {
-	online.value = data.iothub
+  online.value = data.iothub
 }
 
 const updateSystemInfo = (data: SystemInfo) => {
-	systemInfo.value = data
+  systemInfo.value = data
 }
 
 const updateTimeouts = (data: Timeouts) => {
-	timeouts.value = data
+  timeouts.value = data
 }
 
 const updateFactoryResetStatus = (data: FactoryReset) => {
-	console.log("Factory reset status update:", data)
-	factoryResetResult.value = data.result
+  console.log("Factory reset status update:", data)
+  factoryResetResult.value = data.result
 }
 
 const updateUpdateStatus = (data: UpdateValidationStatus) => {
-	updateStatus.value = data.status
+  updateStatus.value = data.status
 }
 
 const loadHistoryAndSubscribe = () => {
-	history(updateOnlineStatus, CentrifugeSubscriptionType.OnlineStatus)
-	history(updateSystemInfo, CentrifugeSubscriptionType.SystemInfo)
-	history(updateTimeouts, CentrifugeSubscriptionType.Timeouts)
-	history(updateFactoryResetStatus, CentrifugeSubscriptionType.FactoryReset)
-	history(updateUpdateStatus, CentrifugeSubscriptionType.UpdateStatus)
+  history(updateOnlineStatus, CentrifugeSubscriptionType.OnlineStatus)
+  history(updateSystemInfo, CentrifugeSubscriptionType.SystemInfo)
+  history(updateTimeouts, CentrifugeSubscriptionType.Timeouts)
+  history(updateFactoryResetStatus, CentrifugeSubscriptionType.FactoryReset)
+  history(updateUpdateStatus, CentrifugeSubscriptionType.UpdateStatus)
 
-	subscribe(updateOnlineStatus, CentrifugeSubscriptionType.OnlineStatus)
-	subscribe(updateSystemInfo, CentrifugeSubscriptionType.SystemInfo)
-	subscribe(updateTimeouts, CentrifugeSubscriptionType.Timeouts)
-	subscribe(updateFactoryResetStatus, CentrifugeSubscriptionType.FactoryReset)
-	subscribe(updateUpdateStatus, CentrifugeSubscriptionType.UpdateStatus)
+  subscribe(updateOnlineStatus, CentrifugeSubscriptionType.OnlineStatus)
+  subscribe(updateSystemInfo, CentrifugeSubscriptionType.SystemInfo)
+  subscribe(updateTimeouts, CentrifugeSubscriptionType.Timeouts)
+  subscribe(updateFactoryResetStatus, CentrifugeSubscriptionType.FactoryReset)
+  subscribe(updateUpdateStatus, CentrifugeSubscriptionType.UpdateStatus)
 }
 
 onConnected(() => {
-	loadHistoryAndSubscribe()
+  loadHistoryAndSubscribe()
 })
 
 onMounted(() => {
-	loadHistoryAndSubscribe()
+  loadHistoryAndSubscribe()
 })
 
 const displayItems = computed(() => Array.from(deviceInfo.value, ([title, value]) => ({ title, value })))
