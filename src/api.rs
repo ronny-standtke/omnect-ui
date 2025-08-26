@@ -111,8 +111,10 @@ where
     pub async fn healthcheck(api: web::Data<Self>) -> impl Responder {
         debug!("healthcheck() called");
 
-        match api.service_client.version_info().await {
-            Ok(info) if info.mismatch => HttpResponse::ServiceUnavailable().json(&info),
+        match api.service_client.healthcheck_info().await {
+            Ok(info) if info.version_info.mismatch => {
+                HttpResponse::ServiceUnavailable().json(&info)
+            }
             Ok(info) => HttpResponse::Ok().json(&info),
             Err(e) => {
                 error!("healthcheck: {e:#}");

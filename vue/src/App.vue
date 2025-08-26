@@ -8,10 +8,12 @@ import DialogContent from "./components/DialogContent.vue"
 import OmnectLogo from "./components/OmnectLogo.vue"
 import OverlaySpinner from "./components/OverlaySpinner.vue"
 import UserMenu from "./components/UserMenu.vue"
+import { useAwaitUpdate } from "./composables/useAwaitUpdate"
 import { useCentrifuge } from "./composables/useCentrifugo"
 import { useOverlaySpinner } from "./composables/useOverlaySpinner"
 import { useSnackbar } from "./composables/useSnackbar"
 import { useWaitReconnect } from "./composables/useWaitReconnect"
+import type { HealthcheckResponse } from "./types"
 
 axios.defaults.validateStatus = (_) => true
 
@@ -19,6 +21,7 @@ const { snackbarState } = useSnackbar()
 const { overlaySpinnerState, reset } = useOverlaySpinner()
 const { initializeCentrifuge } = useCentrifuge()
 const { onConnected } = useWaitReconnect()
+const { onUpdateDone } = useAwaitUpdate()
 const { lgAndUp } = useDisplay()
 const router = useRouter()
 const route = useRoute()
@@ -26,6 +29,11 @@ const showSideBar: Ref<boolean> = ref(lgAndUp.value)
 const overlay: Ref<boolean> = ref(false)
 const errorTitle = ref("")
 const errorMsg = ref("")
+
+onUpdateDone(() => {
+	reset()
+	router.push("/login")
+})
 
 onConnected(() => {
 	reset()
@@ -50,11 +58,11 @@ onMounted(async () => {
 			Expires: "0"
 		}
 	})
-	const data = await res.json()
+	const data = (await res.json()) as HealthcheckResponse
 	if (!res.ok) {
 		overlay.value = true
 		errorTitle.value = "omnect-device-service version mismatch"
-		errorMsg.value = `Current version: ${data.current}. Required version ${data.required}. Please consider to update omnect Secure OS.`
+		errorMsg.value = `Current version: ${data.version_info.current}. Required version ${data.version_info.required}. Please consider to update omnect Secure OS.`
 	}
 })
 </script>

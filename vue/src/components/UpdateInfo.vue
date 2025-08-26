@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { useFetch } from "@vueuse/core"
 import { ref, toRef } from "vue"
+import { useAwaitUpdate } from "../composables/useAwaitUpdate"
 import { useOverlaySpinner } from "../composables/useOverlaySpinner"
 import { useSnackbar } from "../composables/useSnackbar"
-import { useWaitReconnect } from "../composables/useWaitReconnect"
 import router from "../plugins/router"
 import type { UpdateManifest } from "../types/update-manifest"
 import KeyValuePair from "./ui-components/KeyValuePair.vue"
 
 const { showError: snackbarShowError } = useSnackbar()
 const { overlaySpinnerState, reset: resetOverlay } = useOverlaySpinner()
-const { startWaitReconnect, stopWaitReconnect } = useWaitReconnect()
+const { startWaitReconnect, stopWaitReconnect } = useAwaitUpdate()
 
 const props = defineProps<{
 	updateManifest: UpdateManifest | undefined
