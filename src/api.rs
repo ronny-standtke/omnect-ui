@@ -215,11 +215,11 @@ where
         }
     }
 
-    pub async fn token(session: Session, api: web::Data<Self>) -> impl Responder {
+    pub async fn token(session: Session) -> impl Responder {
         debug!("token() called");
 
         cancel_rollback_timer().await;
-        api.cancel_pending_rollback().await;
+        Self::cancel_pending_rollback().await;
         Self::session_token(session)
     }
 
@@ -362,7 +362,7 @@ where
 
         if let Err(e) = api.configure_network_interface(&network_settings).await {
             error!("set_network() failed: {e:#}");
-            if let Err(err) = api.restore_network_setting(&network_settings) {
+            if let Err(err) = Self::restore_network_setting(&network_settings) {
                 error!("Failed to restore network settings: {err:#}");
             }
             return HttpResponse::InternalServerError().body(format!("{e:#}"));
@@ -371,7 +371,7 @@ where
         HttpResponse::Ok().finish()
     }
 
-    fn restore_network_setting(&self, network: &NetworkSetting) -> Result<()> {
+    fn restore_network_setting(network: &NetworkSetting) -> Result<()> {
         let config_file = network_path!(format!("10-{}.network", network.name));
         let backup_file = network_path!(format!("10-{}.network.old", network.name));
 
@@ -390,7 +390,7 @@ where
         &self,
         network: &NetworkSetting,
     ) -> Result<()> {
-        self.restore_network_setting(network)?;
+        Self::restore_network_setting(network)?;
         self.service_client.reload_network().await?;
         certificate::create_module_certificate(Some(network.previous_ip)).await?;
         trigger_server_restart();
@@ -431,9 +431,9 @@ where
         }
 
         if network.dhcp {
-            self.store_dhcp_network_setting(network.clone())?;
+            Self::store_dhcp_network_setting(network.clone())?;
         } else {
-            self.store_static_network_setting(network.clone())?;
+            Self::store_static_network_setting(network.clone())?;
         }
 
         let service_client = Arc::clone(&self.service_client);
@@ -443,17 +443,13 @@ where
         });
 
         if network.is_server_addr && network.ip_changed {
-            self.handle_server_restart_with_new_certificate(network)
-                .await?;
+            Self::handle_server_restart_with_new_certificate(network).await?;
         }
 
         Ok(())
     }
 
-    async fn handle_server_restart_with_new_certificate(
-        &self,
-        network: &NetworkSetting,
-    ) -> Result<()> {
+    async fn handle_server_restart_with_new_certificate(network: &NetworkSetting) -> Result<()> {
         let rollback_time = SystemTime::now() + Duration::from_secs(90);
 
         let pending_rollback = PendingNetworkRollback {
@@ -461,7 +457,7 @@ where
             rollback_time,
         };
 
-        if let Err(e) = self.save_pending_rollback(&pending_rollback) {
+        if let Err(e) = Self::save_pending_rollback(&pending_rollback) {
             error!("Failed to save pending rollback: {e:#}");
         }
 
@@ -486,13 +482,13 @@ where
         Ok(())
     }
 
-    fn save_pending_rollback(&self, rollback: &PendingNetworkRollback) -> Result<()> {
+    fn save_pending_rollback(rollback: &PendingNetworkRollback) -> Result<()> {
         let rollback_json =
             serde_json::to_string_pretty(rollback).context("Failed to serialize rollback")?;
         fs::write(rollback_file_path!(), rollback_json).context("Failed to write rollback file")
     }
 
-    fn load_pending_rollback(&self) -> Option<PendingNetworkRollback> {
+    fn load_pending_rollback() -> Option<PendingNetworkRollback> {
         if let Ok(contents) = fs::read_to_string(rollback_file_path!()) {
             serde_json::from_str(&contents).ok()
         } else {
@@ -500,12 +496,12 @@ where
         }
     }
 
-    fn clear_pending_rollback(&self) {
+    fn clear_pending_rollback() {
         let _ = fs::remove_file(rollback_file_path!());
     }
 
     pub async fn check_and_execute_pending_rollback(&self) -> Result<()> {
-        if let Some(pending) = self.load_pending_rollback() {
+        if let Some(pending) = Self::load_pending_rollback() {
             let now = SystemTime::now();
 
             if now >= pending.rollback_time {
@@ -520,13 +516,13 @@ where
                     info!("Pending network rollback executed successfully");
                 }
 
-                self.clear_pending_rollback();
+                Self::clear_pending_rollback();
             } else if let Ok(remaining_time) = pending.rollback_time.duration_since(now) {
                 let network_clone = pending.network_setting.clone();
 
                 sleep(Duration::from_secs(remaining_time.as_secs())).await;
 
-                if self.load_pending_rollback().is_some() {
+                if Self::load_pending_rollback().is_some() {
                     if let Err(e) = self
                         .restore_network_setting_and_reset_certificate(&network_clone)
                         .await
@@ -535,21 +531,21 @@ where
                     } else {
                         info!("Scheduled network rollback executed successfully");
                     }
-                    self.clear_pending_rollback();
+                    Self::clear_pending_rollback();
                 }
             }
         }
         Ok(())
     }
 
-    pub async fn cancel_pending_rollback(&self) {
-        if self.load_pending_rollback().is_some() {
-            self.clear_pending_rollback();
+    pub async fn cancel_pending_rollback() {
+        if Self::load_pending_rollback().is_some() {
+            Self::clear_pending_rollback();
             info!("Pending network rollback cancelled");
         }
     }
 
-    fn store_dhcp_network_setting(&self, network: NetworkSetting) -> Result<()> {
+    fn store_dhcp_network_setting(network: NetworkSetting) -> Result<()> {
         let mut ini = Ini::new();
 
         ini.with_section(Some("Match".to_owned()))
@@ -564,7 +560,7 @@ where
         Ok(())
     }
 
-    fn store_static_network_setting(&self, network: NetworkSetting) -> Result<()> {
+    fn store_static_network_setting(network: NetworkSetting) -> Result<()> {
         let mut ini = Ini::new();
 
         ini.with_section(Some("Match".to_owned()))
