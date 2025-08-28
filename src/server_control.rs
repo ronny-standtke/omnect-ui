@@ -11,19 +11,19 @@ static ROLLBACK_TIMER: std::sync::OnceLock<Arc<RwLock<Option<AbortHandle>>>> =
     std::sync::OnceLock::new();
 
 pub fn trigger_server_restart() {
-    if let Some(tx) = SERVER_RESTART_TX.get() {
-        if let Err(e) = tx.send(()) {
-            error!("Failed to trigger server restart: {e:#}");
-        }
+    if let Some(tx) = SERVER_RESTART_TX.get()
+        && let Err(e) = tx.send(())
+    {
+        error!("Failed to trigger server restart: {e:#}");
     }
 }
 
 pub async fn cancel_rollback_timer() {
-    if let Some(timer_handle) = ROLLBACK_TIMER.get() {
-        if let Some(handle) = timer_handle.write().await.take() {
-            handle.abort();
-            info!("Rollback timer cancelled - network change confirmed");
-        }
+    if let Some(timer_handle) = ROLLBACK_TIMER.get()
+        && let Some(handle) = timer_handle.write().await.take()
+    {
+        handle.abort();
+        info!("Rollback timer cancelled - network change confirmed");
     }
 }
 

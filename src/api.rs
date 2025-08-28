@@ -361,8 +361,10 @@ where
         }
 
         if let Err(e) = api.configure_network_interface(&network_settings).await {
-            let _ = api.restore_network_setting(&network_settings);
             error!("set_network() failed: {e:#}");
+            if let Err(err) = api.restore_network_setting(&network_settings) {
+                error!("Failed to restore network settings: {err:#}");
+            }
             return HttpResponse::InternalServerError().body(format!("{e:#}"));
         }
 
@@ -373,7 +375,7 @@ where
         let config_file = network_path!(format!("10-{}.network", network.name));
         let backup_file = network_path!(format!("10-{}.network.old", network.name));
 
-        if !fs::exists(&backup_file)? {
+        if !Path::new(&backup_file).exists() {
             return Ok(());
         }
 
@@ -463,13 +465,13 @@ where
             error!("Failed to save pending rollback: {e:#}");
         }
 
-        let network_clone = network.clone();
+        let network = network.clone();
 
         task::spawn(async move {
-            let ip = if network_clone.dhcp {
+            let ip = if network.dhcp {
                 None
             } else {
-                Some(network_clone.ip.unwrap())
+                Some(network.ip.unwrap())
             };
 
             if let Err(e) = certificate::create_module_certificate(ip).await {
@@ -485,9 +487,9 @@ where
     }
 
     fn save_pending_rollback(&self, rollback: &PendingNetworkRollback) -> Result<()> {
-        let rollback_json = serde_json::to_string_pretty(rollback)?;
-        fs::write(rollback_file_path!(), rollback_json).context("Failed to write rollback file")?;
-        Ok(())
+        let rollback_json =
+            serde_json::to_string_pretty(rollback).context("Failed to serialize rollback")?;
+        fs::write(rollback_file_path!(), rollback_json).context("Failed to write rollback file")
     }
 
     fn load_pending_rollback(&self) -> Option<PendingNetworkRollback> {
