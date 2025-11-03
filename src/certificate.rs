@@ -1,11 +1,9 @@
 #![cfg_attr(feature = "mock", allow(dead_code, unused_imports))]
 
-use crate::{
-    omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient},
-    socket_client::SocketClient,
-};
-use anyhow::{Context, Result};
+use crate::omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient};
+use anyhow::{Context, Result, ensure};
 use log::info;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::Write};
 
@@ -53,30 +51,55 @@ pub async fn create_module_certificate() -> Result<()> {
     let gen_id = std::env::var("IOTEDGE_MODULEGENERATIONID")
         .context("IOTEDGE_MODULEGENERATIONID missing")?;
     let api_version = std::env::var("IOTEDGE_APIVERSION").context("IOTEDGE_APIVERSION missing")?;
-    let uri = std::env::var("IOTEDGE_WORKLOADURI").context("IOTEDGE_WORKLOADURI missing")?;
+    let workload_uri =
+        std::env::var("IOTEDGE_WORKLOADURI").context("IOTEDGE_WORKLOADURI missing")?;
+
     let payload = CreateCertPayload {
         common_name: ods_client.ip_address().await?,
     };
-    let path = format!("/modules/{id}/genid/{gen_id}/certificate/server?api-version={api_version}");
-    let uri = hyperlocal::Uri::new(
-        uri.strip_prefix("unix://")
-            .context("unexpected workload uri prefix")?,
-        &path,
-    )
-    .into();
-    let socket_client = SocketClient::new();
-    let response: CreateCertResponse = serde_json::from_str(
-        &socket_client
-            .post_with_json_body(&uri, payload)
-            .await
-            .context("create_module_certificate request failed")?,
-    )
-    .context("CreateCertResponse not possible")?;
-    let mut file = File::create(cert_path()).context("could not be create cert_path")?;
-    file.write_all(response.certificate.as_bytes())
-        .context("could not write to cert_path")?;
 
-    let mut file = File::create(key_path()).context("could not be create key_path")?;
+    let path = format!("/modules/{id}/genid/{gen_id}/certificate/server?api-version={api_version}");
+
+    // Extract the Unix socket path from the workload URI
+    // IoT Edge provides URIs like "unix:///var/run/iotedge/workload.sock"
+    let socket_path = workload_uri
+        .strip_prefix("unix://")
+        .context("IOTEDGE_WORKLOADURI must use unix:// scheme")?;
+
+    // Create a client for the IoT Edge workload socket
+    let client = Client::builder()
+        .unix_socket(socket_path)
+        .build()
+        .context("failed to create HTTP client for workload socket")?;
+
+    let url = format!("http://localhost{}", path);
+    info!("POST {} (IoT Edge workload API)", url);
+
+    let res = client
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await
+        .context("failed to send certificate request to IoT Edge workload API")?;
+
+    let status = res.status();
+    let body = res.text().await.context("failed to read response body")?;
+
+    ensure!(
+        status.is_success(),
+        "certificate request failed with status {} and body: {}",
+        status,
+        body
+    );
+
+    let response: CreateCertResponse =
+        serde_json::from_str(&body).context("failed to parse CreateCertResponse")?;
+
+    let mut file = File::create(cert_path()).context("failed to create cert file")?;
+    file.write_all(response.certificate.as_bytes())
+        .context("failed to write certificate to file")?;
+
+    let mut file = File::create(key_path()).context("failed to create key file")?;
     file.write_all(response.private_key.bytes.as_bytes())
-        .context("could not write to key_path")
+        .context("failed to write private key to file")
 }

@@ -4,11 +4,11 @@ mod common;
 mod keycloak_client;
 mod middleware;
 mod omnect_device_service_client;
-mod socket_client;
 
 use crate::{
-    api::Api, certificate::create_module_certificate,
-    omnect_device_service_client::OmnectDeviceServiceClient,
+    api::Api,
+    certificate::create_module_certificate,
+    omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient},
 };
 use actix_files::Files;
 use actix_multipart::form::MultipartFormConfig;
@@ -27,7 +27,7 @@ use anyhow::Result;
 use common::{centrifugo_config, config_path};
 use env_logger::{Builder, Env, Target};
 use keycloak_client::KeycloakProvider;
-use log::{debug, info};
+use log::{debug, error, info};
 use rustls::crypto::{CryptoProvider, ring::default_provider};
 use std::{fs, io::Write};
 use tokio::{
@@ -72,7 +72,7 @@ async fn main() {
 
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
     let mut centrifugo = run_centrifugo();
-    let (server_handle, server_task) = run_server().await;
+    let (server_handle, server_task, service_client) = run_server().await;
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -95,12 +95,18 @@ async fn main() {
         }
     }
 
+    // Shutdown service client
+    if let Err(e) = service_client.shutdown().await {
+        error!("failed to shutdown service client: {}", e);
+    }
+
     debug!("good bye");
 }
 
 async fn run_server() -> (
     ServerHandle,
     tokio::task::JoinHandle<Result<(), std::io::Error>>,
+    OmnectDeviceServiceClient,
 ) {
     CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
 
@@ -116,14 +122,13 @@ async fn run_server() -> (
 
     type UiApi = Api<OmnectDeviceServiceClient, KeycloakProvider>;
 
-    let api = UiApi::new(
-        OmnectDeviceServiceClient::new(true)
-            .await
-            .expect("failed to create client to device service"),
-        Default::default(),
-    )
-    .await
-    .expect("failed to create api");
+    let service_client = OmnectDeviceServiceClient::new(true)
+        .await
+        .expect("failed to create client to device service");
+
+    let api = UiApi::new(service_client.clone(), Default::default())
+        .await
+        .expect("failed to create api");
 
     let mut tls_certs = std::io::BufReader::new(
         std::fs::File::open(certificate::cert_path()).expect("read certs_file"),
@@ -239,7 +244,7 @@ async fn run_server() -> (
     .disable_signals()
     .run();
 
-    (server.handle(), tokio::spawn(server))
+    (server.handle(), tokio::spawn(server), service_client)
 }
 
 fn run_centrifugo() -> Child {

@@ -3,7 +3,6 @@ use base64::{Engine, prelude::BASE64_STANDARD};
 use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
 #[cfg(feature = "mock")]
 use mockall::automock;
-use reqwest::blocking::get;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -48,9 +47,14 @@ pub fn config() -> String {
 }
 
 pub async fn realm_public_key() -> Result<RS256PublicKey> {
-    let resp = get(keycloak_url!())
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(keycloak_url!())
+        .send()
+        .await
         .context("failed to fetch from url")?
         .json::<RealmInfo>()
+        .await
         .context("failed to parse realm info")?;
 
     RS256PublicKey::from_der(&BASE64_STANDARD.decode(resp.public_key.as_bytes()).unwrap())

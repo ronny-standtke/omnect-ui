@@ -1,5 +1,5 @@
-ARG DOCKER_NAMESPACE
-ARG VERSION_RUST_CONTAINER
+ARG DOCKER_NAMESPACE=omnectweucopsacr.azurecr.io
+ARG VERSION_RUST_CONTAINER=1.89.0-bookworm
 ARG DISTROLESS_IMAGE=gcr.io/distroless/base-debian12:nonroot
 
 FROM oven/bun AS vue-install

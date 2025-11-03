@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 name = "omnect-ui"
 readme = "README.md"
 repository = "git@github.com:omnect/omnect-ui.git"
-version = "1.0.1"
+version = "1.0.2"
 build = "src/build.rs"
 
 [dependencies]
@@ -27,13 +27,6 @@ anyhow = { version = "1.0", default-features = false }
 argon2 = { version = "0.5", default-features = false, features = ["password-hash", "alloc"] }
 base64 = { version = "0.22", default-features = false }
 env_logger = { version = "0.11", default-features = false }
-http-body-util = { version = "0.1", default-features = false }
-hyper = { version = "1.6", default-features = false, features = [
-  "client",
-  "http1",
-] }
-hyperlocal = { version = "0.9", default-features = false, features = ["client"] }
-hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 jwt-simple = { version = "0.12", default-features = false, features = [
   "optimal",
 ] }
@@ -43,7 +36,7 @@ log-panics = { version = "2.1", default-features = false, features = [
 ] }
 mockall = { version = "0.13", optional = true, default-features = false }
 rand_core = { version = "0.9", default-features = false, features = ["std"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
 rustls = { version = "0.23", default-features = false, features = [
   "aws_lc_rs",
   "std",

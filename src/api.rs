@@ -21,7 +21,6 @@ use std::{
     io::Write,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 macro_rules! data_path {
@@ -66,8 +65,8 @@ where
     ServiceClient: DeviceServiceClient,
     SingleSignOn: SingleSignOnProvider,
 {
-    pub service_client: Arc<ServiceClient>,
-    pub single_sign_on: Arc<SingleSignOn>,
+    pub service_client: ServiceClient,
+    pub single_sign_on: SingleSignOn,
     pub index_html: PathBuf,
     pub tenant: String,
 }
@@ -84,8 +83,8 @@ where
             std::fs::canonicalize("static/index.html").context("static/index.html not found")?;
         let tenant = std::env::var("TENANT").unwrap_or("cp".to_string());
         Ok(Api {
-            service_client: Arc::new(service_client),
-            single_sign_on: Arc::new(single_sign_on),
+            service_client,
+            single_sign_on,
             index_html,
             tenant,
         })

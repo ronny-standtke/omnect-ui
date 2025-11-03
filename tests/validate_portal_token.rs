@@ -1,7 +1,7 @@
 use actix_web::{App, http::header::ContentType, test, web};
 use omnect_ui::api::Api;
 use omnect_ui::keycloak_client::TokenClaims;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 #[mockall_double::double]
 use omnect_ui::{
@@ -47,8 +47,8 @@ fn make_api(
         .returning(move |_| Ok(claims.clone()));
 
     Api {
-        service_client: Arc::new(device_service_client_mock),
-        single_sign_on: Arc::new(single_sign_on_provider_mock),
+        service_client: device_service_client_mock,
+        single_sign_on: single_sign_on_provider_mock,
         index_html: PathBuf::from("/dev/null"),
         tenant: tenant.to_string(),
     }
