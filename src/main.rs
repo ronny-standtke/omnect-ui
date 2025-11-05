@@ -8,6 +8,8 @@ mod omnect_device_service_client;
 use crate::{
     api::Api,
     certificate::create_module_certificate,
+    common::{centrifugo_config, config_path},
+    keycloak_client::KeycloakProvider,
     omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient},
 };
 use actix_files::Files;
@@ -24,9 +26,7 @@ use actix_web::{
     web::{self, Data},
 };
 use anyhow::Result;
-use common::{centrifugo_config, config_path};
 use env_logger::{Builder, Env, Target};
-use keycloak_client::KeycloakProvider;
 use log::{debug, error, info};
 use rustls::crypto::{CryptoProvider, ring::default_provider};
 use std::{fs, io::Write};
@@ -70,7 +70,7 @@ async fn main() {
         .await
         .expect("failed to create module certificate");
 
-    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+    let mut sigterm = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
     let mut centrifugo = run_centrifugo();
     let (server_handle, server_task, service_client) = run_server().await;
 
@@ -85,7 +85,7 @@ async fn main() {
         },
         _ = server_task => {
             debug!("server stopped");
-            centrifugo.kill().await.expect("kill centrifugo failed");
+            centrifugo.kill().await.expect("failed to kill centrifugo");
             debug!("centrifugo killed");
         },
         _ = centrifugo.wait() => {
@@ -97,7 +97,7 @@ async fn main() {
 
     // Shutdown service client
     if let Err(e) = service_client.shutdown().await {
-        error!("failed to shutdown service client: {}", e);
+        error!("failed to shutdown service client: {e:#}");
     }
 
     debug!("good bye");
@@ -111,7 +111,7 @@ async fn run_server() -> (
     CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
 
     let Ok(true) = fs::exists("/data") else {
-        panic!("data dir /data is missing");
+        panic!("failed to find required data directory: /data is missing");
     };
 
     if !fs::exists(config_path!()).is_ok_and(|ok| ok) {
@@ -131,10 +131,10 @@ async fn run_server() -> (
         .expect("failed to create api");
 
     let mut tls_certs = std::io::BufReader::new(
-        std::fs::File::open(certificate::cert_path()).expect("read certs_file"),
+        std::fs::File::open(certificate::cert_path()).expect("failed to read certificate file"),
     );
     let mut tls_key = std::io::BufReader::new(
-        std::fs::File::open(certificate::key_path()).expect("read key_file"),
+        std::fs::File::open(certificate::key_path()).expect("failed to read key file"),
     );
 
     let tls_certs = rustls_pemfile::certs(&mut tls_certs)
@@ -143,24 +143,24 @@ async fn run_server() -> (
 
     // set up TLS config options
     let tls_config = match rustls_pemfile::read_one(&mut tls_key)
-        .expect("cannot read key pem file")
-        .expect("nothing found in key pem file")
+        .expect("failed to read key pem file")
+        .expect("failed to parse key pem file: no valid key found")
     {
         rustls_pemfile::Item::Pkcs1Key(key) => rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(tls_certs, rustls::pki_types::PrivateKeyDer::Pkcs1(key))
-            .expect("invalid tls config"),
+            .expect("failed to create TLS config"),
         rustls_pemfile::Item::Pkcs8Key(key) => rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(tls_certs, rustls::pki_types::PrivateKeyDer::Pkcs8(key))
-            .expect("invalid tls config"),
-        _ => panic!("unexpected item found in key pem file"),
+            .expect("failed to create TLS config"),
+        _ => panic!("failed to parse key pem file: unexpected item type found"),
     };
 
     let ui_port = std::env::var("UI_PORT")
-        .expect("UI_PORT missing")
+        .expect("failed to read UI_PORT environment variable")
         .parse::<u64>()
-        .expect("UI_PORT format");
+        .expect("failed to parse UI_PORT: invalid format");
 
     let session_key = Key::generate();
 
@@ -235,12 +235,12 @@ async fn run_server() -> (
             .route("/healthcheck", web::get().to(UiApi::healthcheck))
             .service(Files::new(
                 "/static",
-                std::fs::canonicalize("static").expect("static folder not found"),
+                std::fs::canonicalize("static").expect("failed to find static folder"),
             ))
             .default_service(web::route().to(UiApi::index))
     })
     .bind_rustls_0_23(format!("0.0.0.0:{ui_port}"), tls_config)
-    .expect("bind_rustls")
+    .expect("failed to bind server with TLS")
     .disable_signals()
     .run();
 
@@ -248,32 +248,41 @@ async fn run_server() -> (
 }
 
 fn run_centrifugo() -> Child {
-    let centrifugo =
-        Command::new(std::fs::canonicalize("centrifugo").expect("centrifugo not found"))
-            .arg("-c")
-            .arg("/centrifugo_config.json")
-            .envs(vec![
-                (
-                    "CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM",
-                    certificate::cert_path(),
-                ),
-                (
-                    "CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM",
-                    certificate::key_path(),
-                ),
-                ("CENTRIFUGO_HTTP_SERVER_PORT", centrifugo_config().port),
-                (
-                    "CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY",
-                    centrifugo_config().client_token,
-                ),
-                ("CENTRIFUGO_HTTP_API_KEY", centrifugo_config().api_key),
-            ])
-            .spawn()
-            .expect("Failed to spawn child process");
+    let centrifugo = Command::new(
+        std::fs::canonicalize("centrifugo").expect("failed to find centrifugo binary"),
+    )
+    .arg("-c")
+    .arg("/centrifugo_config.json")
+    .envs(vec![
+        (
+            "CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM",
+            certificate::cert_path(),
+        ),
+        (
+            "CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM",
+            certificate::key_path(),
+        ),
+        (
+            "CENTRIFUGO_HTTP_SERVER_PORT",
+            centrifugo_config().port.clone(),
+        ),
+        (
+            "CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY",
+            centrifugo_config().client_token.clone(),
+        ),
+        (
+            "CENTRIFUGO_HTTP_API_KEY",
+            centrifugo_config().api_key.clone(),
+        ),
+    ])
+    .spawn()
+    .expect("failed to spawn centrifugo process");
 
     info!(
         "centrifugo pid: {}",
-        centrifugo.id().expect("centrifugo pid")
+        centrifugo
+            .id()
+            .expect("failed to get centrifugo process id")
     );
 
     centrifugo

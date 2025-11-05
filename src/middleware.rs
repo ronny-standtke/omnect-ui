@@ -16,6 +16,7 @@ use std::{
 };
 
 pub const TOKEN_EXPIRE_HOURS: u64 = 2;
+pub const TOKEN_SUBJECT: &str = "omnect-ui";
 
 pub struct AuthMw;
 
@@ -96,7 +97,7 @@ pub fn verify_token(token: &str) -> bool {
         accept_future: true,
         time_tolerance: Some(Duration::from_mins(15)),
         max_validity: Some(Duration::from_hours(TOKEN_EXPIRE_HOURS)),
-        required_subject: Some("omnect-ui".to_string()),
+        required_subject: Some(TOKEN_SUBJECT.to_string()),
         ..Default::default()
     };
 
@@ -160,7 +161,7 @@ pub mod tests {
             expires_at: Some(expires_at),
             invalid_before: None,
             issuer: None,
-            subject: Some("omnect-ui".to_string()),
+            subject: Some(TOKEN_SUBJECT.to_string()),
             audiences: None,
             jwt_id: None,
             nonce: None,
@@ -182,7 +183,7 @@ pub mod tests {
             expires_at: Some(expires_at),
             invalid_before: None,
             issuer: None,
-            subject: Some("omnect-ui".to_string()),
+            subject: Some(TOKEN_SUBJECT.to_string()),
             audiences: None,
             jwt_id: None,
             nonce: None,

@@ -3,7 +3,9 @@ use base64::{Engine, prelude::BASE64_STANDARD};
 use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
 #[cfg(feature = "mock")]
 use mockall::automock;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TokenClaims {
@@ -19,8 +21,9 @@ struct RealmInfo {
 
 macro_rules! keycloak_url {
     () => {{
-        std::env::var("KEYCLOAK_URL")
-            .unwrap_or("https://keycloak.omnect.conplement.cloud/realms/cp-prod".to_string())
+        std::env::var("KEYCLOAK_URL").unwrap_or_else(|_| {
+            "https://keycloak.omnect.conplement.cloud/realms/cp-prod".to_string()
+        })
     }};
 }
 
@@ -46,8 +49,13 @@ pub fn config() -> String {
     format!("window.__APP_CONFIG__ = {{KEYCLOAK_URL:\"{keycloak_url}\"}};")
 }
 
+fn http_client() -> &'static Client {
+    static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
+    HTTP_CLIENT.get_or_init(Client::new)
+}
+
 pub async fn realm_public_key() -> Result<RS256PublicKey> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let resp = client
         .get(keycloak_url!())
         .send()
@@ -57,6 +65,9 @@ pub async fn realm_public_key() -> Result<RS256PublicKey> {
         .await
         .context("failed to parse realm info")?;
 
-    RS256PublicKey::from_der(&BASE64_STANDARD.decode(resp.public_key.as_bytes()).unwrap())
-        .context("failed to decode public key")
+    let decoded = BASE64_STANDARD
+        .decode(resp.public_key.as_bytes())
+        .context("failed to decode public key from base64")?;
+
+    RS256PublicKey::from_der(&decoded).context("failed to parse public key from DER format")
 }

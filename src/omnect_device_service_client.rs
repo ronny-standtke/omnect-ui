@@ -9,7 +9,7 @@ use reqwest::Client;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::env;
+use std::{env, sync::OnceLock};
 
 #[derive(Clone, Debug, Default, Deserialize_repr, PartialEq, Serialize_repr)]
 #[repr(u8)]
@@ -146,8 +146,27 @@ pub trait DeviceServiceClient {
 impl OmnectDeviceServiceClient {
     const REQUIRED_CLIENT_VERSION: &str = ">=0.39.0";
 
+    // API endpoint constants
+    const STATUS_ENDPOINT: &str = "/status/v1";
+    const REPUBLISH_ENDPOINT: &str = "/republish/v1/";
+    const FACTORY_RESET_ENDPOINT: &str = "/factory-reset/v1";
+    const REBOOT_ENDPOINT: &str = "/reboot/v1";
+    const RELOAD_NETWORK_ENDPOINT: &str = "/reload-network/v1";
+    const LOAD_UPDATE_ENDPOINT: &str = "/fwupdate/load/v1";
+    const RUN_UPDATE_ENDPOINT: &str = "/fwupdate/run/v1";
+    const PUBLISH_ENDPOINT: &str = "/publish-endpoint/v1";
+
+    fn required_version() -> &'static VersionReq {
+        static REQUIRED_VERSION: OnceLock<VersionReq> = OnceLock::new();
+        REQUIRED_VERSION.get_or_init(|| {
+            VersionReq::parse(Self::REQUIRED_CLIENT_VERSION)
+                .expect("invalid REQUIRED_CLIENT_VERSION constant")
+        })
+    }
+
     pub async fn new(register_publish_endpoint: bool) -> Result<Self> {
-        let socket_path = env::var("SOCKET_PATH").unwrap_or("/socket/api.sock".to_string());
+        let socket_path =
+            env::var("SOCKET_PATH").unwrap_or_else(|_| "/socket/api.sock".to_string());
         let client = Client::builder()
             .unix_socket(socket_path)
             .build()
@@ -176,7 +195,7 @@ impl OmnectDeviceServiceClient {
             },
             HeaderKeyValue {
                 name: String::from("X-API-Key"),
-                value: centrifugo_config.api_key,
+                value: centrifugo_config.api_key.clone(),
             },
         ];
 
@@ -188,45 +207,50 @@ impl OmnectDeviceServiceClient {
             },
         };
 
-        self.post_json("/publish-endpoint/v1", body)
-            .await
-            .map(|_| ())
+        self.post_json(Self::PUBLISH_ENDPOINT, body).await?;
+        Ok(())
+    }
+
+    fn build_url(&self, path: &str) -> String {
+        // Normalize path to always start with a single "/"
+        let normalized_path = path.trim_start_matches('/');
+        format!("http://localhost/{}", normalized_path)
     }
 
     /// GET request to the device service API
     async fn get(&self, path: &str) -> Result<String> {
-        let url = format!("http://localhost{}", path);
-        info!("GET {}", url);
+        let url = self.build_url(path);
+        info!("GET {url}");
 
         let res = self
             .client
             .get(&url)
             .send()
             .await
-            .context(format!("failed to send GET request to {}", url))?;
+            .context(format!("failed to send GET request to {url}"))?;
 
         self.handle_response(res, &url).await
     }
 
     /// POST request to the device service API (empty body)
     async fn post(&self, path: &str) -> Result<String> {
-        let url = format!("http://localhost{}", path);
-        info!("POST {}", url);
+        let url = self.build_url(path);
+        info!("POST {url}");
 
         let res = self
             .client
             .post(&url)
             .send()
             .await
-            .context(format!("failed to send POST request to {}", url))?;
+            .context(format!("failed to send POST request to {url}"))?;
 
         self.handle_response(res, &url).await
     }
 
     /// POST request to the device service API with JSON body
     async fn post_json(&self, path: &str, body: impl Serialize) -> Result<String> {
-        let url = format!("http://localhost{}", path);
-        info!("POST {} (with JSON body)", url);
+        let url = self.build_url(path);
+        info!("POST {url} (with JSON body)");
 
         let res = self
             .client
@@ -234,7 +258,7 @@ impl OmnectDeviceServiceClient {
             .json(&body)
             .send()
             .await
-            .context(format!("failed to send POST request to {}", url))?;
+            .context(format!("failed to send POST request to {url}"))?;
 
         self.handle_response(res, &url).await
     }
@@ -273,67 +297,70 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
             .network_status
             .network_interfaces
             .iter()
-            .filter_map(|iface| {
-                if iface.online
-                    && let Some(addr_info) = iface.ipv4.addrs.first()
-                {
-                    return Some(addr_info.addr.clone());
-                }
-                None
+            .find_map(|iface| {
+                iface
+                    .online
+                    .then(|| iface.ipv4.addrs.first().map(|addr| addr.addr.clone()))
+                    .flatten()
             })
-            .next()
             .context("failed to get ip address from status")
     }
 
     async fn status(&self) -> Result<Status> {
-        let body = self.get("/status/v1").await?;
+        let body = self.get(Self::STATUS_ENDPOINT).await?;
         serde_json::from_str(&body).context("failed to parse status")
     }
 
     async fn republish(&self) -> Result<()> {
-        self.post(concat!("/republish/v1/", env!("CARGO_PKG_NAME")))
-            .await
-            .map(|_| ())
+        self.post(&format!(
+            "{}{}",
+            Self::REPUBLISH_ENDPOINT,
+            env!("CARGO_PKG_NAME")
+        ))
+        .await?;
+        Ok(())
     }
 
     async fn factory_reset(&self, factory_reset: FactoryReset) -> Result<()> {
-        self.post_json("/factory-reset/v1", factory_reset)
-            .await
-            .map(|_| ())
+        self.post_json(Self::FACTORY_RESET_ENDPOINT, factory_reset)
+            .await?;
+        Ok(())
     }
 
     async fn reboot(&self) -> Result<()> {
-        self.post("/reboot/v1").await.map(|_| ())
+        self.post(Self::REBOOT_ENDPOINT).await?;
+        Ok(())
     }
 
     async fn reload_network(&self) -> Result<()> {
-        self.post("/reload-network/v1").await.map(|_| ())
+        self.post(Self::RELOAD_NETWORK_ENDPOINT).await?;
+        Ok(())
     }
 
     async fn load_update(&self, load_update: LoadUpdate) -> Result<String> {
-        self.post_json("/fwupdate/load/v1", load_update).await
+        self.post_json(Self::LOAD_UPDATE_ENDPOINT, load_update)
+            .await
     }
 
     async fn run_update(&self, run_update: RunUpdate) -> Result<()> {
-        self.post_json("/fwupdate/run/v1", run_update)
-            .await
-            .map(|_| ())
+        self.post_json(Self::RUN_UPDATE_ENDPOINT, run_update)
+            .await?;
+        Ok(())
     }
 
     async fn healthcheck_info(&self) -> Result<HealthcheckInfo> {
         let status = self.status().await?;
         let current_version = status.system_info.omnect_device_service_version;
 
-        let required_version = VersionReq::parse(Self::REQUIRED_CLIENT_VERSION)
-            .map_err(|e| anyhow!("failed to parse required version: {e}"))?;
-        let current_version = Version::parse(&current_version)
+        let required_version = Self::required_version();
+        let parsed_current = Version::parse(&current_version)
             .map_err(|e| anyhow!("failed to parse current version: {e}"))?;
 
         Ok(HealthcheckInfo {
             version_info: VersionInfo {
                 required: Self::REQUIRED_CLIENT_VERSION.to_string(),
-                current: current_version.to_string(),
-                mismatch: !required_version.matches(&current_version),
+                current: current_version,
+                mismatch: !required_version.matches(&parsed_current),
             },
             update_validation_status: status.update_validation_status,
         })
@@ -341,19 +368,17 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
 
     async fn shutdown(&self) -> Result<()> {
         if self.register_publish_endpoint {
-            let url = format!(
-                "http://localhost/publish-endpoint/v1/{}",
-                env!("CARGO_PKG_NAME")
-            );
-            info!("DELETE {} (explicit shutdown)", url);
+            let path = format!("{}/{}", Self::PUBLISH_ENDPOINT, env!("CARGO_PKG_NAME"));
+            let url = self.build_url(&path);
+            info!("DELETE {url} (explicit shutdown)");
 
             self.client
                 .delete(&url)
                 .send()
                 .await
-                .context("failed to send unregister request")?
+                .context("failed to send DELETE request to unregister endpoint")?
                 .error_for_status()
-                .context("unregister endpoint returned error status")?;
+                .context("failed to unregister endpoint: server returned error status")?;
         }
         Ok(())
     }

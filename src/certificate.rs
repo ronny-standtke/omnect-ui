@@ -1,7 +1,10 @@
 #![cfg_attr(feature = "mock", allow(dead_code, unused_imports))]
 
-use crate::omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient};
-use anyhow::{Context, Result, ensure};
+use crate::{
+    common::handle_http_response,
+    omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient},
+};
+use anyhow::{Context, Result};
 use log::info;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -31,11 +34,11 @@ struct CreateCertResponse {
 }
 
 pub fn cert_path() -> String {
-    std::env::var("CERT_PATH").unwrap_or("/cert/cert.pem".to_string())
+    std::env::var("CERT_PATH").unwrap_or_else(|_| "/cert/cert.pem".to_string())
 }
 
 pub fn key_path() -> String {
-    std::env::var("KEY_PATH").unwrap_or("/cert/key.pem".to_string())
+    std::env::var("KEY_PATH").unwrap_or_else(|_| "/cert/key.pem".to_string())
 }
 
 #[cfg(feature = "mock")]
@@ -47,12 +50,14 @@ pub async fn create_module_certificate() -> Result<()> {
 pub async fn create_module_certificate() -> Result<()> {
     info!("create module certificate");
     let ods_client = OmnectDeviceServiceClient::new(false).await?;
-    let id = std::env::var("IOTEDGE_MODULEID").context("IOTEDGE_MODULEID missing")?;
+    let id = std::env::var("IOTEDGE_MODULEID")
+        .context("failed to read IOTEDGE_MODULEID environment variable")?;
     let gen_id = std::env::var("IOTEDGE_MODULEGENERATIONID")
-        .context("IOTEDGE_MODULEGENERATIONID missing")?;
-    let api_version = std::env::var("IOTEDGE_APIVERSION").context("IOTEDGE_APIVERSION missing")?;
-    let workload_uri =
-        std::env::var("IOTEDGE_WORKLOADURI").context("IOTEDGE_WORKLOADURI missing")?;
+        .context("failed to read IOTEDGE_MODULEGENERATIONID environment variable")?;
+    let api_version = std::env::var("IOTEDGE_APIVERSION")
+        .context("failed to read IOTEDGE_APIVERSION environment variable")?;
+    let workload_uri = std::env::var("IOTEDGE_WORKLOADURI")
+        .context("failed to read IOTEDGE_WORKLOADURI environment variable")?;
 
     let payload = CreateCertPayload {
         common_name: ods_client.ip_address().await?,
@@ -64,7 +69,7 @@ pub async fn create_module_certificate() -> Result<()> {
     // IoT Edge provides URIs like "unix:///var/run/iotedge/workload.sock"
     let socket_path = workload_uri
         .strip_prefix("unix://")
-        .context("IOTEDGE_WORKLOADURI must use unix:// scheme")?;
+        .context("failed to parse IOTEDGE_WORKLOADURI: must use unix:// scheme")?;
 
     // Create a client for the IoT Edge workload socket
     let client = Client::builder()
@@ -73,7 +78,7 @@ pub async fn create_module_certificate() -> Result<()> {
         .context("failed to create HTTP client for workload socket")?;
 
     let url = format!("http://localhost{}", path);
-    info!("POST {} (IoT Edge workload API)", url);
+    info!("POST {url} (IoT Edge workload API)");
 
     let res = client
         .post(&url)
@@ -82,15 +87,7 @@ pub async fn create_module_certificate() -> Result<()> {
         .await
         .context("failed to send certificate request to IoT Edge workload API")?;
 
-    let status = res.status();
-    let body = res.text().await.context("failed to read response body")?;
-
-    ensure!(
-        status.is_success(),
-        "certificate request failed with status {} and body: {}",
-        status,
-        body
-    );
+    let body = handle_http_response(res, "certificate request").await?;
 
     let response: CreateCertResponse =
         serde_json::from_str(&body).context("failed to parse CreateCertResponse")?;

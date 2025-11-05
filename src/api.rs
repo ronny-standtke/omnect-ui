@@ -1,8 +1,10 @@
 use crate::{
-    common::{centrifugo_config, config_path, validate_password},
+    common::{
+        centrifugo_config, config_path, data_path, host_data_path, tmp_path, validate_password,
+    },
     keycloak_client::SingleSignOnProvider,
     middleware::TOKEN_EXPIRE_HOURS,
-    omnect_device_service_client::*,
+    omnect_device_service_client::{DeviceServiceClient, FactoryReset, LoadUpdate, RunUpdate},
 };
 use actix_files::NamedFile;
 use actix_multipart::form::{MultipartForm, tempfile::TempFile};
@@ -22,24 +24,6 @@ use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
-
-macro_rules! data_path {
-    ($filename:expr) => {
-        Path::new("/data/").join($filename)
-    };
-}
-
-macro_rules! host_data_path {
-    ($filename:expr) => {
-        Path::new(&format!("/var/lib/{}/", env!("CARGO_PKG_NAME"))).join($filename)
-    };
-}
-
-macro_rules! tmp_path {
-    ($filename:expr) => {
-        Path::new("/tmp/").join($filename)
-    };
-}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,10 +62,21 @@ where
 {
     const UPDATE_FILE_NAME: &str = "update.tar";
 
+    /// Helper to handle service client results with consistent error logging
+    fn handle_service_result(result: Result<()>, operation: &str) -> HttpResponse {
+        match result {
+            Ok(_) => HttpResponse::Ok().finish(),
+            Err(e) => {
+                error!("{operation} failed: {e:#}");
+                HttpResponse::InternalServerError().body(e.to_string())
+            }
+        }
+    }
+
     pub async fn new(service_client: ServiceClient, single_sign_on: SingleSignOn) -> Result<Self> {
-        let index_html =
-            std::fs::canonicalize("static/index.html").context("static/index.html not found")?;
-        let tenant = std::env::var("TENANT").unwrap_or("cp".to_string());
+        let index_html = std::fs::canonicalize("static/index.html")
+            .context("failed to find static/index.html")?;
+        let tenant = std::env::var("TENANT").unwrap_or_else(|_| "cp".to_string());
         Ok(Api {
             service_client,
             single_sign_on,
@@ -117,7 +112,7 @@ where
             Ok(info) => HttpResponse::Ok().json(&info),
             Err(e) => {
                 error!("healthcheck: {e:#}");
-                HttpResponse::InternalServerError().body(format!("{e}"))
+                HttpResponse::InternalServerError().body(e.to_string())
             }
         }
     }
@@ -136,33 +131,19 @@ where
             }
             Err(e) => {
                 error!("factory_reset: {e:#}");
-                HttpResponse::InternalServerError().body(format!("{e}"))
+                HttpResponse::InternalServerError().body(e.to_string())
             }
         }
     }
 
     pub async fn reboot(api: web::Data<Self>) -> impl Responder {
         debug!("reboot() called");
-
-        match api.service_client.reboot().await {
-            Ok(_) => HttpResponse::Ok().finish(),
-            Err(e) => {
-                error!("reboot failed: {e:#}");
-                HttpResponse::InternalServerError().body(format!("{e}"))
-            }
-        }
+        Self::handle_service_result(api.service_client.reboot().await, "reboot")
     }
 
     pub async fn reload_network(api: web::Data<Self>) -> impl Responder {
         debug!("reload_network() called");
-
-        match api.service_client.reload_network().await {
-            Ok(_) => HttpResponse::Ok().finish(),
-            Err(e) => {
-                error!("reload_network failed: {e:#}");
-                HttpResponse::InternalServerError().body(format!("{e}"))
-            }
-        }
+        Self::handle_service_result(api.service_client.reload_network().await, "reload_network")
     }
 
     pub async fn token(session: Session) -> impl Responder {
@@ -190,7 +171,10 @@ where
             return HttpResponse::BadRequest().body("update file is missing");
         };
 
-        let _ = Self::clear_data_folder();
+        if let Err(e) = Self::clear_data_folder() {
+            error!("failed to clear data folder: {e:#}");
+            // Continue anyway as this is not critical
+        }
 
         if let Err(e) = Self::persist_uploaded_file(
             form.file,
@@ -198,7 +182,7 @@ where
             &data_path!(&Self::UPDATE_FILE_NAME),
         ) {
             error!("save_file() failed: {e:#}");
-            return HttpResponse::InternalServerError().body(format!("{e}"));
+            return HttpResponse::InternalServerError().body(e.to_string());
         }
 
         HttpResponse::Ok().finish()
@@ -219,21 +203,17 @@ where
             Ok(data) => HttpResponse::Ok().body(data),
             Err(e) => {
                 error!("load_update failed: {e:#}");
-                HttpResponse::InternalServerError().body(format!("{e}"))
+                HttpResponse::InternalServerError().body(e.to_string())
             }
         }
     }
 
     pub async fn run_update(body: web::Json<RunUpdate>, api: web::Data<Self>) -> impl Responder {
         debug!("run_update() called with validate_iothub_connection: {body:?}");
-
-        match api.service_client.run_update(body.into_inner()).await {
-            Ok(_) => HttpResponse::Ok().finish(),
-            Err(e) => {
-                error!("run_update failed: {e:#}");
-                HttpResponse::InternalServerError().body(format!("{e}"))
-            }
-        }
+        Self::handle_service_result(
+            api.service_client.run_update(body.into_inner()).await,
+            "run_update",
+        )
     }
 
     pub async fn set_password(
@@ -250,7 +230,7 @@ where
 
         if let Err(e) = Self::store_or_update_password(&body.password) {
             error!("set_password() failed: {e:#}");
-            return HttpResponse::InternalServerError().body(format!("{e:#}"));
+            return HttpResponse::InternalServerError().body(e.to_string());
         }
 
         Self::session_token(session)
@@ -269,7 +249,7 @@ where
 
         if let Err(e) = Self::store_or_update_password(&body.password) {
             error!("update_password() failed: {e:#}");
-            return HttpResponse::InternalServerError().body(format!("{e:#}"));
+            return HttpResponse::InternalServerError().body(e.to_string());
         }
 
         session.purge();
@@ -300,28 +280,28 @@ where
     async fn validate_token_and_claims(&self, token: &str) -> Result<()> {
         let claims = self.single_sign_on.verify_token(token).await?;
         let Some(tenant_list) = &claims.tenant_list else {
-            bail!("user has no tenant list");
+            bail!("failed to authorize user: no tenant list in token");
         };
         if !tenant_list.contains(&self.tenant) {
-            bail!("user has no permission to set password");
+            bail!("failed to authorize user: insufficient permissions for tenant");
         }
         let Some(roles) = &claims.roles else {
-            bail!("user has no roles");
+            bail!("failed to authorize user: no roles in token");
         };
         if roles.contains(&String::from("FleetAdministrator")) {
             return Ok(());
         }
         if roles.contains(&String::from("FleetOperator")) {
             let Some(fleet_list) = &claims.fleet_list else {
-                bail!("user has no permission on this fleet");
+                bail!("failed to authorize user: no fleet list in token");
             };
             let fleet_id = self.service_client.fleet_id().await?;
             if !fleet_list.contains(&fleet_id) {
-                bail!("user has no permission on this fleet");
+                bail!("failed to authorize user: insufficient permissions for fleet");
             }
             return Ok(());
         }
-        bail!("user has no permission to set password")
+        bail!("failed to authorize user: insufficient role permissions")
     }
 
     fn clear_data_folder() -> Result<()> {
