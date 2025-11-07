@@ -2,11 +2,11 @@
 
 use crate::{
     common::handle_http_response,
+    http_client,
     omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient},
 };
 use anyhow::{Context, Result};
 use log::info;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::Write};
 
@@ -65,17 +65,8 @@ pub async fn create_module_certificate() -> Result<()> {
 
     let path = format!("/modules/{id}/genid/{gen_id}/certificate/server?api-version={api_version}");
 
-    // Extract the Unix socket path from the workload URI
-    // IoT Edge provides URIs like "unix:///var/run/iotedge/workload.sock"
-    let socket_path = workload_uri
-        .strip_prefix("unix://")
-        .context("failed to parse IOTEDGE_WORKLOADURI: must use unix:// scheme")?;
-
     // Create a client for the IoT Edge workload socket
-    let client = Client::builder()
-        .unix_socket(socket_path)
-        .build()
-        .context("failed to create HTTP client for workload socket")?;
+    let client = http_client::unix_socket_client(&workload_uri)?;
 
     let url = format!("http://localhost{}", path);
     info!("POST {url} (IoT Edge workload API)");

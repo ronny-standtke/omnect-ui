@@ -1,6 +1,7 @@
 mod api;
 mod certificate;
 mod common;
+mod http_client;
 mod keycloak_client;
 mod middleware;
 mod omnect_device_service_client;
@@ -76,31 +77,36 @@ async fn main() {
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
-            debug!("ctrl-c");
-            server_handle.stop(true).await;
+            debug!("ctrl-c received");
         },
         _ = sigterm.recv() => {
             debug!("SIGTERM received");
-            server_handle.stop(true).await;
         },
         _ = server_task => {
-            debug!("server stopped");
-            centrifugo.kill().await.expect("failed to kill centrifugo");
-            debug!("centrifugo killed");
+            debug!("server stopped unexpectedly");
         },
         _ = centrifugo.wait() => {
-            debug!("centrifugo stopped");
-            server_handle.stop(true).await;
-            debug!("server stopped");
+            debug!("centrifugo stopped unexpectedly");
         }
     }
 
-    // Shutdown service client
+    // Unified cleanup sequence - ensures consistent shutdown regardless of exit reason
+    info!("shutting down...");
+
+    // 1. Shutdown service client first (unregister from omnect-device-service)
     if let Err(e) = service_client.shutdown().await {
         error!("failed to shutdown service client: {e:#}");
     }
 
-    debug!("good bye");
+    // 2. Stop the server gracefully
+    server_handle.stop(true).await;
+    info!("server stopped");
+
+    // 3. Kill centrifugo
+    if let Err(e) = centrifugo.kill().await {
+        error!("failed to kill centrifugo: {e:#}");
+    }
+    info!("centrifugo stopped");
 }
 
 async fn run_server() -> (

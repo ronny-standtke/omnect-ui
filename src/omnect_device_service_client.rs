@@ -1,6 +1,6 @@
 #![cfg_attr(feature = "mock", allow(dead_code, unused_imports))]
 
-use crate::common::centrifugo_config;
+use crate::{common::centrifugo_config, http_client};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use log::info;
 #[cfg(feature = "mock")]
@@ -167,10 +167,7 @@ impl OmnectDeviceServiceClient {
     pub async fn new(register_publish_endpoint: bool) -> Result<Self> {
         let socket_path =
             env::var("SOCKET_PATH").unwrap_or_else(|_| "/socket/api.sock".to_string());
-        let client = Client::builder()
-            .unix_socket(socket_path)
-            .build()
-            .context("failed to create HTTP client")?;
+        let client = http_client::unix_socket_client(&socket_path)?;
 
         let omnect_client = OmnectDeviceServiceClient {
             client,
