@@ -163,7 +163,7 @@ async fn test_unix_socket_client_integration_multiple_requests() {
 
     // Make multiple requests to ensure the client can be reused
     for i in 0..3 {
-        let url = format!("http://localhost/test/{}", i);
+        let url = format!("http://localhost/test/{i}");
         let response = client
             .get(&url)
             .send()

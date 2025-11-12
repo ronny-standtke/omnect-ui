@@ -6,3 +6,4 @@ centrifugo
 *.env
 *.http
 /static
+CLAUDE.md

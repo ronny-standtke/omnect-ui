@@ -10,10 +10,12 @@ mod omnect_device_service_client;
 use crate::{
     api::Api,
     auth::TokenManager,
-    certificate::create_module_certificate,
-    common::{centrifugo_config, config_path},
+    certificate::{CreateCertPayload, create_module_certificate},
+    common::{centrifugo_config, centrifugo_publish_endpoint, config_path},
     keycloak_client::KeycloakProvider,
-    omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient},
+    omnect_device_service_client::{
+        DeviceServiceClient, OmnectDeviceServiceClient, OmnectDeviceServiceClientBuilder,
+    },
 };
 use actix_files::Files;
 use actix_multipart::form::MultipartFormConfig;
@@ -41,8 +43,7 @@ use tokio::{
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
 
-#[actix_web::main]
-async fn main() {
+fn initialize() {
     log_panics::init();
 
     let mut builder = if cfg!(debug_assertions) {
@@ -69,13 +70,35 @@ async fn main() {
         env!("GIT_SHORT_REV")
     );
 
-    create_module_certificate()
-        .await
-        .expect("failed to create module certificate");
+    CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
+
+    let Ok(true) = fs::exists("/data") else {
+        panic!("failed to find required data directory: /data is missing");
+    };
+
+    if !fs::exists(config_path!()).is_ok_and(|ok| ok) {
+        fs::create_dir_all(config_path!()).expect("failed to create config directory");
+    };
+
+    common::create_frontend_config_file().expect("failed to create frontend config file");
+}
+
+#[actix_web::main]
+async fn main() {
+    initialize();
 
     let mut sigterm = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
     let mut centrifugo = run_centrifugo();
-    let (server_handle, server_task, service_client) = run_server().await;
+    let service_client = OmnectDeviceServiceClientBuilder::new()
+        .with_certificate_setup(|payload: CreateCertPayload| async move {
+            create_module_certificate(payload).await
+        })
+        .with_publish_endpoint(centrifugo_publish_endpoint())
+        .build()
+        .await
+        .expect("failed to create device service client");
+
+    let (server_handle, server_task) = run_server(service_client.clone()).await;
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -95,7 +118,7 @@ async fn main() {
     // Unified cleanup sequence - ensures consistent shutdown regardless of exit reason
     info!("shutting down...");
 
-    // 1. Shutdown service client first (unregister from omnect-device-service)
+    // 1. Shutdown service client (unregister from omnect-device-service)
     if let Err(e) = service_client.shutdown().await {
         error!("failed to shutdown service client: {e:#}");
     }
@@ -111,33 +134,7 @@ async fn main() {
     info!("centrifugo stopped");
 }
 
-async fn run_server() -> (
-    ServerHandle,
-    tokio::task::JoinHandle<Result<(), std::io::Error>>,
-    OmnectDeviceServiceClient,
-) {
-    CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
-
-    let Ok(true) = fs::exists("/data") else {
-        panic!("failed to find required data directory: /data is missing");
-    };
-
-    if !fs::exists(config_path!()).is_ok_and(|ok| ok) {
-        fs::create_dir_all(config_path!()).expect("failed to create config directory");
-    };
-
-    common::create_frontend_config_file().expect("failed to create frontend config file");
-
-    type UiApi = Api<OmnectDeviceServiceClient, KeycloakProvider>;
-
-    let service_client = OmnectDeviceServiceClient::new(true)
-        .await
-        .expect("failed to create client to device service");
-
-    let api = UiApi::new(service_client.clone(), Default::default())
-        .await
-        .expect("failed to create api");
-
+fn load_tls_config() -> rustls::ServerConfig {
     let mut tls_certs = std::io::BufReader::new(
         std::fs::File::open(certificate::cert_path()).expect("failed to read certificate file"),
     );
@@ -149,8 +146,7 @@ async fn run_server() -> (
         .collect::<Result<Vec<_>, _>>()
         .expect("failed to parse cert pem");
 
-    // set up TLS config options
-    let tls_config = match rustls_pemfile::read_one(&mut tls_key)
+    match rustls_pemfile::read_one(&mut tls_key)
         .expect("failed to read key pem file")
         .expect("failed to parse key pem file: no valid key found")
     {
@@ -163,7 +159,22 @@ async fn run_server() -> (
             .with_single_cert(tls_certs, rustls::pki_types::PrivateKeyDer::Pkcs8(key))
             .expect("failed to create TLS config"),
         _ => panic!("failed to parse key pem file: unexpected item type found"),
-    };
+    }
+}
+
+async fn run_server(
+    service_client: OmnectDeviceServiceClient,
+) -> (
+    ServerHandle,
+    tokio::task::JoinHandle<Result<(), std::io::Error>>,
+) {
+    type UiApi = Api<OmnectDeviceServiceClient, KeycloakProvider>;
+
+    let api = UiApi::new(service_client.clone(), Default::default())
+        .await
+        .expect("failed to create api");
+
+    let tls_config = load_tls_config();
 
     let ui_port = std::env::var("UI_PORT")
         .expect("failed to read UI_PORT environment variable")
@@ -256,7 +267,7 @@ async fn run_server() -> (
     .disable_signals()
     .run();
 
-    (server.handle(), tokio::spawn(server), service_client)
+    (server.handle(), tokio::spawn(server))
 }
 
 fn run_centrifugo() -> Child {

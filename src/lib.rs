@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub mod certificate;
 pub mod common;
 pub mod http_client;
 pub mod keycloak_client;

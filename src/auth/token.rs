@@ -46,7 +46,7 @@ impl TokenManager {
         self.inner
             .key
             .authenticate(claims)
-            .map_err(|e| anyhow::anyhow!("failed to create token: {}", e))
+            .map_err(|e| anyhow::anyhow!("failed to create token: {e:#}"))
     }
 
     /// Verify a token and check if it's valid

@@ -33,6 +33,23 @@ pub fn centrifugo_config() -> Arc<CentrifugoConfig> {
         .clone()
 }
 
+pub fn centrifugo_publish_endpoint() -> crate::omnect_device_service_client::PublishEndpoint {
+    let cfg = centrifugo_config();
+    crate::omnect_device_service_client::PublishEndpoint {
+        url: format!("https://localhost:{}/api/publish", cfg.port),
+        headers: vec![
+            crate::omnect_device_service_client::HeaderKeyValue {
+                name: String::from("Content-Type"),
+                value: String::from("application/json"),
+            },
+            crate::omnect_device_service_client::HeaderKeyValue {
+                name: String::from("X-API-Key"),
+                value: cfg.api_key.clone(),
+            },
+        ],
+    }
+}
+
 macro_rules! config_path {
     () => {
         std::path::Path::new(
@@ -109,10 +126,7 @@ pub async fn handle_http_response(res: Response, context_msg: &str) -> Result<St
 
     ensure!(
         status.is_success(),
-        "{} failed with status {} and body: {}",
-        context_msg,
-        status,
-        body
+        "{context_msg} failed with status {status} and body: {body}"
     );
 
     Ok(body)

@@ -42,7 +42,7 @@ COPY src/build.rs ./omnect-ui/src/build.rs
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry cd omnect-ui && cargo build ${OMNECT_UI_BUILD_ARG} --release --target-dir ./build
 
-COPY src/* ./omnect-ui/src/
+COPY src ./omnect-ui/src/
 COPY .git ./omnect-ui/.git
 RUN --mount=type=cache,target=/usr/local/cargo/registry <<EOF
   set -e

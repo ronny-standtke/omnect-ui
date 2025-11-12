@@ -1,19 +1,16 @@
 #![cfg_attr(feature = "mock", allow(dead_code, unused_imports))]
 
-use crate::{
-    common::handle_http_response,
-    http_client,
-    omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient},
-};
+use crate::{common::handle_http_response, http_client};
 use anyhow::{Context, Result};
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::Write};
 
-#[derive(Serialize)]
-struct CreateCertPayload {
+// Public payload for passing to certificate creation
+#[derive(Debug, Serialize)]
+pub struct CreateCertPayload {
     #[serde(rename = "commonName")]
-    common_name: String,
+    pub common_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,14 +39,13 @@ pub fn key_path() -> String {
 }
 
 #[cfg(feature = "mock")]
-pub async fn create_module_certificate() -> Result<()> {
+pub async fn create_module_certificate(_payload: CreateCertPayload) -> Result<()> {
     Ok(())
 }
 
 #[cfg(not(feature = "mock"))]
-pub async fn create_module_certificate() -> Result<()> {
+pub async fn create_module_certificate(payload: CreateCertPayload) -> Result<()> {
     info!("create module certificate");
-    let ods_client = OmnectDeviceServiceClient::new(false).await?;
     let id = std::env::var("IOTEDGE_MODULEID")
         .context("failed to read IOTEDGE_MODULEID environment variable")?;
     let gen_id = std::env::var("IOTEDGE_MODULEGENERATIONID")
@@ -59,17 +55,13 @@ pub async fn create_module_certificate() -> Result<()> {
     let workload_uri = std::env::var("IOTEDGE_WORKLOADURI")
         .context("failed to read IOTEDGE_WORKLOADURI environment variable")?;
 
-    let payload = CreateCertPayload {
-        common_name: ods_client.ip_address().await?,
-    };
-
-    let path = format!("/modules/{id}/genid/{gen_id}/certificate/server?api-version={api_version}");
+    let path = format!("modules/{id}/genid/{gen_id}/certificate/server?api-version={api_version}");
 
     // Create a client for the IoT Edge workload socket
     let client = http_client::unix_socket_client(&workload_uri)?;
 
-    let url = format!("http://localhost{}", path);
-    info!("POST {url} (IoT Edge workload API)");
+    let url = format!("http://localhost/{path}");
+    info!("POST {url} (IoT Edge workload API) with payload: {payload:?}");
 
     let res = client
         .post(&url)

@@ -1,6 +1,6 @@
 #![cfg_attr(feature = "mock", allow(dead_code, unused_imports))]
 
-use crate::{common::centrifugo_config, http_client};
+use crate::{certificate::CreateCertPayload, http_client};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use log::info;
 #[cfg(feature = "mock")]
@@ -9,7 +9,7 @@ use reqwest::Client;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::{env, sync::OnceLock};
+use std::{env, fmt::Debug, sync::OnceLock};
 
 #[derive(Clone, Debug, Default, Deserialize_repr, PartialEq, Serialize_repr)]
 #[repr(u8)]
@@ -93,19 +93,19 @@ pub struct HealthcheckInfo {
     pub update_validation_status: UpdateValidationStatus,
 }
 
-#[derive(Serialize)]
-struct HeaderKeyValue {
-    name: String,
-    value: String,
+#[derive(Debug, Serialize)]
+pub struct HeaderKeyValue {
+    pub name: String,
+    pub value: String,
 }
 
-#[derive(Serialize)]
-struct PublishEndpoint {
-    url: String,
-    headers: Vec<HeaderKeyValue>,
+#[derive(Debug, Serialize)]
+pub struct PublishEndpoint {
+    pub url: String,
+    pub headers: Vec<HeaderKeyValue>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct PublishIdEndpoint {
     id: &'static str,
     endpoint: PublishEndpoint,
@@ -114,32 +114,85 @@ struct PublishIdEndpoint {
 #[derive(Clone)]
 pub struct OmnectDeviceServiceClient {
     client: Client,
-    register_publish_endpoint: bool,
+    has_publish_endpoint: bool,
+}
+
+type CertSetupFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>>>>;
+type CertSetupFn = Box<dyn FnOnce(CreateCertPayload) -> CertSetupFuture>;
+
+pub struct OmnectDeviceServiceClientBuilder {
+    publish_endpoint: Option<PublishEndpoint>,
+    certificate_setup: Option<CertSetupFn>,
+}
+
+impl Default for OmnectDeviceServiceClientBuilder {
+    fn default() -> Self {
+        Self {
+            publish_endpoint: None,
+            certificate_setup: None,
+        }
+    }
+}
+
+impl OmnectDeviceServiceClientBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_publish_endpoint(mut self, endpoint: PublishEndpoint) -> Self {
+        self.publish_endpoint = Some(endpoint);
+        self
+    }
+
+    pub fn with_certificate_setup<F, Fut>(mut self, setup_fn: F) -> Self
+    where
+        F: FnOnce(CreateCertPayload) -> Fut + 'static,
+        Fut: std::future::Future<Output = Result<()>> + 'static,
+    {
+        self.certificate_setup = Some(Box::new(move |payload| Box::pin(setup_fn(payload))));
+        self
+    }
+
+    pub async fn build(self) -> Result<OmnectDeviceServiceClient> {
+        let socket_path =
+            env::var("SOCKET_PATH").unwrap_or_else(|_| "/socket/api.sock".to_string());
+        let client = http_client::unix_socket_client(&socket_path)?;
+
+        let mut omnect_client = OmnectDeviceServiceClient {
+            client,
+            has_publish_endpoint: false,
+        };
+
+        // Setup certificate if provided
+        if let Some(setup_fn) = self.certificate_setup {
+            let common_name = omnect_client.ip_address().await?;
+            let payload = CreateCertPayload { common_name };
+            setup_fn(payload).await?;
+        }
+
+        // Register publish endpoint if provided
+        if let Some(endpoint) = self.publish_endpoint {
+            omnect_client.register_publish_endpoint(endpoint).await?;
+            omnect_client.has_publish_endpoint = true;
+        }
+
+        Ok(omnect_client)
+    }
 }
 
 #[cfg_attr(feature = "mock", automock)]
 #[allow(async_fn_in_trait)]
 pub trait DeviceServiceClient {
     async fn fleet_id(&self) -> Result<String>;
-
     async fn ip_address(&self) -> Result<String>;
-
     async fn status(&self) -> Result<Status>;
-
     async fn republish(&self) -> Result<()>;
-
     async fn factory_reset(&self, factory_reset: FactoryReset) -> Result<()>;
-
     async fn reboot(&self) -> Result<()>;
-
     async fn reload_network(&self) -> Result<()>;
-
     async fn load_update(&self, load_update: LoadUpdate) -> Result<String>;
-
     async fn run_update(&self, run_update: RunUpdate) -> Result<()>;
-
     async fn healthcheck_info(&self) -> Result<HealthcheckInfo>;
-
     async fn shutdown(&self) -> Result<()>;
 }
 
@@ -164,54 +217,20 @@ impl OmnectDeviceServiceClient {
         })
     }
 
-    pub async fn new(register_publish_endpoint: bool) -> Result<Self> {
-        let socket_path =
-            env::var("SOCKET_PATH").unwrap_or_else(|_| "/socket/api.sock".to_string());
-        let client = http_client::unix_socket_client(&socket_path)?;
-
-        let omnect_client = OmnectDeviceServiceClient {
-            client,
-            register_publish_endpoint,
-        };
-
-        omnect_client.register_publish_endpoint().await?;
-        Ok(omnect_client)
-    }
-
-    async fn register_publish_endpoint(&self) -> Result<()> {
-        if !self.register_publish_endpoint {
-            return Ok(());
-        }
-
-        let centrifugo_config = centrifugo_config();
-
-        let headers = vec![
-            HeaderKeyValue {
-                name: String::from("Content-Type"),
-                value: String::from("application/json"),
-            },
-            HeaderKeyValue {
-                name: String::from("X-API-Key"),
-                value: centrifugo_config.api_key.clone(),
-            },
-        ];
-
-        let body = PublishIdEndpoint {
+    async fn register_publish_endpoint(&self, endpoint: PublishEndpoint) -> Result<()> {
+        let publish_id_endpoint = PublishIdEndpoint {
             id: env!("CARGO_PKG_NAME"),
-            endpoint: PublishEndpoint {
-                url: format!("https://localhost:{}/api/publish", centrifugo_config.port),
-                headers,
-            },
+            endpoint,
         };
-
-        self.post_json(Self::PUBLISH_ENDPOINT, body).await?;
+        self.post_json(Self::PUBLISH_ENDPOINT, publish_id_endpoint)
+            .await?;
         Ok(())
     }
 
     fn build_url(&self, path: &str) -> String {
         // Normalize path to always start with a single "/"
         let normalized_path = path.trim_start_matches('/');
-        format!("http://localhost/{}", normalized_path)
+        format!("http://localhost/{normalized_path}")
     }
 
     /// GET request to the device service API
@@ -245,9 +264,9 @@ impl OmnectDeviceServiceClient {
     }
 
     /// POST request to the device service API with JSON body
-    async fn post_json(&self, path: &str, body: impl Serialize) -> Result<String> {
+    async fn post_json(&self, path: &str, body: impl Debug + Serialize) -> Result<String> {
         let url = self.build_url(path);
-        info!("POST {url} (with JSON body)");
+        info!("POST {url} with body: {body:?}");
 
         let res = self
             .client
@@ -266,10 +285,7 @@ impl OmnectDeviceServiceClient {
 
         ensure!(
             status.is_success(),
-            "request to {} failed with status {} and body: {}",
-            url,
-            status,
-            body
+            "request to {url} failed with status {status} and body: {body}",
         );
 
         Ok(body)
@@ -364,10 +380,10 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        if self.register_publish_endpoint {
+        if self.has_publish_endpoint {
             let path = format!("{}/{}", Self::PUBLISH_ENDPOINT, env!("CARGO_PKG_NAME"));
             let url = self.build_url(&path);
-            info!("DELETE {url} (explicit shutdown)");
+            info!("DELETE {url}");
 
             self.client
                 .delete(&url)
