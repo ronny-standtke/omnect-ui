@@ -76,9 +76,7 @@ fn initialize() {
         panic!("failed to find required data directory: /data is missing");
     };
 
-    if !fs::exists(config_path!()).is_ok_and(|ok| ok) {
-        fs::create_dir_all(config_path!()).expect("failed to create config directory");
-    };
+    fs::create_dir_all(config_path!()).expect("failed to create config directory");
 
     common::create_frontend_config_file().expect("failed to create frontend config file");
 }

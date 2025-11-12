@@ -120,19 +120,12 @@ pub struct OmnectDeviceServiceClient {
 type CertSetupFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>>>>;
 type CertSetupFn = Box<dyn FnOnce(CreateCertPayload) -> CertSetupFuture>;
 
+#[derive(Default)]
 pub struct OmnectDeviceServiceClientBuilder {
     publish_endpoint: Option<PublishEndpoint>,
     certificate_setup: Option<CertSetupFn>,
 }
 
-impl Default for OmnectDeviceServiceClientBuilder {
-    fn default() -> Self {
-        Self {
-            publish_endpoint: None,
-            certificate_setup: None,
-        }
-    }
-}
 
 impl OmnectDeviceServiceClientBuilder {
     pub fn new() -> Self {
