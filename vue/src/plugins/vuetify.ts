@@ -7,12 +7,12 @@
 // Styles
 import "@mdi/font/css/materialdesignicons.css"
 import "vuetify/lib/styles/main.css"
-import * as components from "vuetify/components"
-import * as directives from "vuetify/directives"
-import * as labsComponents from "vuetify/labs/components"
 
 // Composables
 import { createVuetify } from "vuetify"
+import * as components from "vuetify/components"
+import * as directives from "vuetify/directives"
+import * as labsComponents from "vuetify/labs/components"
 import { componentAliases, theme, themeDefaults } from "../theme/theme.default"
 
 // https://vuetifyjs.com/en/introduction/why-vuetify/#feature-guides

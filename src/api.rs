@@ -2,6 +2,7 @@ use crate::{
     auth::TokenManager,
     common::{config_path, data_path, host_data_path, tmp_path, validate_password},
     keycloak_client::SingleSignOnProvider,
+    network::{NetworkConfig, NetworkConfigService},
     omnect_device_service_client::{DeviceServiceClient, FactoryReset, LoadUpdate, RunUpdate},
 };
 use actix_files::NamedFile;
@@ -146,6 +147,7 @@ where
     pub async fn token(session: Session, token_manager: web::Data<TokenManager>) -> impl Responder {
         debug!("token() called");
 
+        NetworkConfigService::cancel_rollback();
         Self::session_token(session, token_manager)
     }
 
@@ -273,6 +275,18 @@ where
             return HttpResponse::Unauthorized().finish();
         }
         HttpResponse::Ok().finish()
+    }
+
+    pub async fn set_network_config(
+        network_config: web::Json<NetworkConfig>,
+        api: web::Data<Self>,
+    ) -> impl Responder {
+        debug!("set_network_config() called");
+
+        Self::handle_service_result(
+            NetworkConfigService::set_network_config(&api.service_client, &network_config).await,
+            "set_network_config",
+        )
     }
 
     async fn validate_token_and_claims(&self, token: &str) -> Result<()> {

@@ -1,5 +1,6 @@
 {
-	"$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+	"root": false,
+	"$schema": "https://biomejs.dev/schemas/2.2.4/schema.json",
 	"linter": {
 		"enabled": true,
 		"rules": {
@@ -11,13 +12,22 @@
 			},
 			"style": {
 				"noParameterAssign": "off",
-				"useImportType": "off"
+				"useImportType": "off",
+				"useAsConstAssertion": "error",
+				"useDefaultParameterLast": "error",
+				"useEnumInitializers": "error",
+				"useSelfClosingElements": "error",
+				"useSingleVarDeclarator": "error",
+				"noUnusedTemplateLiteral": "error",
+				"useNumberNamespace": "error",
+				"noInferrableTypes": "error",
+				"noUselessElse": "error"
 			},
 			"complexity": {
 				"noStaticOnlyClass": "off"
 			}
 		},
-		"ignore": ["tsconfig.*", "dist"]
+		"includes": ["**", "!**/tsconfig.*", "!**/dist"]
 	},
 	"formatter": {
 		"enabled": true,
@@ -25,7 +35,7 @@
 		"indentStyle": "tab",
 		"indentWidth": 2,
 		"lineWidth": 140,
-		"ignore": []
+		"includes": ["**"]
 	},
 	"javascript": {
 		"formatter": {
@@ -35,6 +45,6 @@
 		}
 	},
 	"files": {
-		"ignore": ["tsconfig.*"]
+		"includes": ["**", "!**/tsconfig.*"]
 	}
 }

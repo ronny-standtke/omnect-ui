@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios"
-import { type Ref, onMounted, ref } from "vue"
+import { onMounted, type Ref, ref } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useDisplay } from "vuetify"
 import BaseSideBar from "./components/BaseSideBar.vue"

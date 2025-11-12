@@ -10,6 +10,7 @@ use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{env, fmt::Debug, sync::OnceLock};
+use trait_variant::make;
 
 #[derive(Clone, Debug, Default, Deserialize_repr, PartialEq, Serialize_repr)]
 #[repr(u8)]
@@ -64,18 +65,20 @@ pub struct NetworkStatus {
     pub network_interfaces: Vec<NetworkInterface>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct NetworkInterface {
     pub online: bool,
     pub ipv4: Ipv4Info,
+    pub file: String,
+    pub name: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Ipv4Info {
     pub addrs: Vec<Ipv4AddrInfo>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Ipv4AddrInfo {
     pub addr: String,
 }
@@ -126,7 +129,6 @@ pub struct OmnectDeviceServiceClientBuilder {
     certificate_setup: Option<CertSetupFn>,
 }
 
-
 impl OmnectDeviceServiceClientBuilder {
     pub fn new() -> Self {
         Self::default()
@@ -173,8 +175,8 @@ impl OmnectDeviceServiceClientBuilder {
     }
 }
 
+#[make(Send)]
 #[cfg_attr(feature = "mock", automock)]
-#[allow(async_fn_in_trait)]
 pub trait DeviceServiceClient {
     async fn fleet_id(&self) -> Result<String>;
     async fn ip_address(&self) -> Result<String>;

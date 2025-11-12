@@ -40,11 +40,14 @@ fn make_api(
     let mut device_service_client_mock = DeviceServiceClient::default();
     device_service_client_mock
         .expect_fleet_id()
-        .returning(|| Ok(fleet_id.to_string()));
+        .returning(move || Box::pin(async move { Ok(fleet_id.to_string()) }));
     let mut single_sign_on_provider_mock = SingleSignOnProvider::default();
     single_sign_on_provider_mock
         .expect_verify_token()
-        .returning(move |_| Ok(claims.clone()));
+        .returning(move |_| {
+            let claims = claims.clone();
+            Box::pin(async move { Ok(claims) })
+        });
 
     Api {
         service_client: device_service_client_mock,

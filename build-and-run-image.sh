@@ -18,6 +18,7 @@ docker run --rm \
   -v $(pwd)/temp:/cert \
   -v /tmp:/socket \
   -v $(pwd)/temp/data:/data \
+  -v $(pwd)/temp/network:/network \
   -u $(id -u):$(id -g) \
   -e RUST_LOG=debug \
   -e UI_PORT=1977 \

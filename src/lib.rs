@@ -5,4 +5,5 @@ pub mod common;
 pub mod http_client;
 pub mod keycloak_client;
 pub mod middleware;
+pub mod network;
 pub mod omnect_device_service_client;

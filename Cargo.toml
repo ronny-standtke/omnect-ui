@@ -7,17 +7,18 @@ license = "MIT OR Apache-2.0"
 name = "omnect-ui"
 readme = "README.md"
 repository = "git@github.com:omnect/omnect-ui.git"
-version = "1.0.6"
+version = "1.1.0"
 build = "src/build.rs"
 
 [dependencies]
+actix-cors = { version = "0.7", default-features = false }
 actix-files = { version = "0.6", default-features = false }
 actix-multipart = { version = "0.7", default-features = false, features = [
   "tempfile",
   "derive"
-]}
-actix-session = { version = "0.10", features = ["cookie-session"] }
+] }
 actix-server = { version = "2.6", default-features = false }
+actix-session = { version = "0.11", features = ["cookie-session"] }
 actix-web = { version = "4.11", default-features = false, features = [
   "macros",
   "rustls-0_23",
@@ -37,6 +38,7 @@ log-panics = { version = "2.1", default-features = false, features = [
 mockall = { version = "0.13", optional = true, default-features = false }
 rand_core = { version = "0.9", default-features = false, features = ["std"] }
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
+rust-ini = { version = "0.21", default-features = false }
 rustls = { version = "0.23", default-features = false, features = [
   "aws_lc_rs",
   "std",
@@ -51,11 +53,13 @@ serde_json = { version = "1.0", default-features = false, features = [
   "raw_value",
 ] }
 serde_repr = { version = "0.1", default-features = false }
+serde_valid = { version = "2.0", default-features = false }
 tokio = { version = "1.45", default-features = false, features = [
   "macros",
   "net",
   "process",
 ] }
+trait-variant = { version = "0.1", default-features = false }
 uuid = { version = "1.17", default-features = false, features = [
   "v4",
 ] }
@@ -66,5 +70,5 @@ mock = ["dep:mockall"]
 [dev-dependencies]
 actix-http = "3.11"
 actix-service = "2.0"
-tempfile = "3.20"
 mockall_double = "0.3"
+tempfile = "3.20"

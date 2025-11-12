@@ -3,7 +3,9 @@ use base64::{Engine, prelude::BASE64_STANDARD};
 use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
 #[cfg(feature = "mock")]
 use mockall::automock;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use trait_variant::make;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TokenClaims {
@@ -25,9 +27,9 @@ macro_rules! keycloak_url {
     }};
 }
 
+#[make(Send + Sync)]
 #[cfg_attr(feature = "mock", automock)]
-#[allow(async_fn_in_trait)]
-pub trait SingleSignOnProvider: Send + Sync {
+pub trait SingleSignOnProvider {
     async fn verify_token(&self, token: &str) -> anyhow::Result<TokenClaims>;
 }
 
@@ -39,12 +41,17 @@ pub struct KeycloakProvider {
 impl Default for KeycloakProvider {
     fn default() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: Client::new(),
         }
     }
 }
 
 impl KeycloakProvider {
+    pub fn config() -> String {
+        let keycloak_url = &keycloak_url!();
+        format!("window.__APP_CONFIG__ = {{KEYCLOAK_URL:\"{keycloak_url}\"}};")
+    }
+
     async fn realm_public_key(&self) -> Result<RS256PublicKey> {
         let resp = self
             .client
@@ -70,9 +77,4 @@ impl SingleSignOnProvider for KeycloakProvider {
         let claims = pub_key.verify_token::<TokenClaims>(token, None)?;
         Ok(claims.custom)
     }
-}
-
-pub fn config() -> String {
-    let keycloak_url = &keycloak_url!();
-    format!("window.__APP_CONFIG__ = {{KEYCLOAK_URL:\"{keycloak_url}\"}};")
 }

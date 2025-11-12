@@ -115,7 +115,7 @@ pub fn create_frontend_config_file() -> Result<()> {
         .context("failed to create frontend config file")?;
 
     config_file
-        .write_all(keycloak_client::config().as_bytes())
+        .write_all(keycloak_client::KeycloakProvider::config().as_bytes())
         .context("failed to write frontend config file")
 }
 

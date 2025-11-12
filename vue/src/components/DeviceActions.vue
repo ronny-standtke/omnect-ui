@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useFetch } from "@vueuse/core"
-import { type Ref, computed, onMounted, ref } from "vue"
+import { computed, onMounted, type Ref, ref } from "vue"
 import { useRouter } from "vue-router"
 import DialogContent from "../components/DialogContent.vue"
 import { useCentrifuge } from "../composables/useCentrifugo"
@@ -9,7 +9,7 @@ import { CentrifugeSubscriptionType } from "../enums/centrifuge-subscription-typ
 import type { FactoryReset } from "../types"
 
 const { subscribe, history, onConnected } = useCentrifuge()
-const { showError, snackbarState } = useSnackbar()
+const { showError } = useSnackbar()
 const router = useRouter()
 const selectedFactoryResetKeys: Ref<string[]> = ref([])
 const factoryResetDialog = ref(false)
@@ -27,13 +27,6 @@ const emit = defineEmits<{
 	(event: "rebootInProgress"): void
 	(event: "factoryResetInProgress"): void
 }>()
-
-const showSuccess = (successMsg: string) => {
-	snackbarState.msg = successMsg
-	snackbarState.color = "success"
-	snackbarState.timeout = 2000
-	snackbarState.snackbar = true
-}
 
 const {
 	onFetchError: onRebootError,
@@ -53,28 +46,7 @@ const {
 	isFetching: resetFetching
 } = useFetch("factory-reset", { immediate: false }).post(factoryResetPayload)
 
-const {
-	onFetchError: onReloadNetworkError,
-	error: reloadNetworkError,
-	statusCode: reloadNetworkStatusCode,
-	onFetchResponse: onReloadNetworkSuccess,
-	execute: reloadNetwork,
-	isFetching: reloadNetworkLoading
-} = useFetch("reload-network", { immediate: false }).post()
-
-const loading = computed(() => rebootFetching.value || resetFetching.value || reloadNetworkLoading.value)
-
-onReloadNetworkSuccess(() => {
-	showSuccess("Restart network successful.")
-})
-
-onReloadNetworkError(() => {
-	if (reloadNetworkStatusCode.value === 401) {
-		router.push("/login")
-	} else {
-		showError(`Reloading network failed: ${JSON.stringify(reloadNetworkError.value)}`)
-	}
-})
+const loading = computed(() => rebootFetching.value || resetFetching.value)
 
 onRebootSuccess(() => {
 	emit("rebootInProgress")
@@ -123,10 +95,6 @@ onMounted(() => {
 <template>
 	<div class="flex flex-col gap-y-4 items-start">
 		<div class="text-h4 text-secondary border-b w-100">Commands</div>
-		<v-btn :prepend-icon="'mdi-refresh'" variant="text" :loading="reloadNetworkLoading.value" :disabled="loading"
-			@click="reloadNetwork(false)">
-			Restart network
-		</v-btn>
 		<v-btn :prepend-icon="'mdi-restart'" variant="text">
 			Reboot
 			<v-dialog v-model="rebootDialog" activator="parent" max-width="340" :no-click-animation="true" persistent
