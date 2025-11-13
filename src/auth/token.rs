@@ -81,10 +81,9 @@ mod tests {
     #[test]
     fn test_create_and_verify_token() {
         let manager = TokenManager::new("test-secret");
-
         let token = manager.create_token().expect("should create token");
-        assert!(!token.is_empty());
 
+        assert!(!token.is_empty());
         assert!(manager.verify_token(&token));
     }
 
@@ -100,7 +99,6 @@ mod tests {
     fn test_verify_token_wrong_secret() {
         let manager1 = TokenManager::new("secret1");
         let manager2 = TokenManager::new("secret2");
-
         let token = manager1.create_token().expect("should create token");
 
         // Token created with secret1 should not verify with secret2

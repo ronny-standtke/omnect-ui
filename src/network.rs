@@ -334,7 +334,7 @@ impl NetworkConfigService {
         info!("executing {} network rollback", label);
 
         if let Err(e) = Self::rollback_and_restart(service_client, network).await {
-            error!("failed to execute {} rollback: {e:#}", label);
+            error!("failed to execute {label} rollback: {e:#}");
         } else {
             info!("{} network rollback executed successfully", label);
         }

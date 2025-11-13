@@ -1,4 +1,4 @@
-use crate::{auth::TokenManager, common::validate_password};
+use crate::auth::{TokenManager, validate_password};
 use actix_session::SessionExt;
 use actix_web::{
     Error, FromRequest, HttpMessage, HttpResponse,
@@ -116,7 +116,7 @@ fn unauthorized_error(req: ServiceRequest) -> ServiceResponse {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::common;
+    use crate::config::AppConfig;
 
     const TOKEN_SUBJECT: &str = "omnect-ui";
     const TOKEN_EXPIRE_HOURS: u64 = 2;
@@ -223,7 +223,7 @@ pub mod tests {
     }
 
     fn generate_token(claim: JWTClaims<NoCustomClaims>) -> String {
-        let key = HS256Key::from_bytes(common::centrifugo_config().client_token.as_bytes());
+        let key = HS256Key::from_bytes(AppConfig::get().centrifugo.client_token.as_bytes());
         key.authenticate(claim).unwrap()
     }
 
@@ -254,7 +254,7 @@ pub mod tests {
             .cookie_http_only(true)
             .build();
 
-        let token_manager = TokenManager::new(common::centrifugo_config().client_token.as_str());
+        let token_manager = TokenManager::new(AppConfig::get().centrifugo.client_token.as_str());
 
         test::init_service(
             App::new()
@@ -377,28 +377,28 @@ pub mod tests {
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
-    fn create_password_file(password: &str) -> tempfile::TempDir {
+    fn setup_password_file(password: &str) {
+        use crate::config::AppConfig;
+
         let argon2 = Argon2::default();
         let salt = SaltString::generate(&mut OsRng);
         let hashed_password = argon2.hash_password(password.as_bytes(), &salt).unwrap();
-        let config_path = tempfile::tempdir().unwrap();
-        let file_path = config_path.path().join("password");
-        let mut file = File::create(&file_path).unwrap();
+
+        let password_file = &AppConfig::get().paths.password_file;
+        let config_dir = password_file.parent().unwrap();
+        std::fs::create_dir_all(config_dir).unwrap();
+        let mut file = File::create(password_file).unwrap();
 
         file.write_all(hashed_password.to_string().as_bytes())
             .unwrap();
-
-        config_path
     }
 
     #[tokio::test]
     async fn middleware_correct_user_credentials_should_succeed_and_return_valid_token() {
-        let app = create_service().await;
-
         let password = "some-password";
-        let config_path = create_password_file(password);
-        // TODO: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("CONFIG_PATH", config_path.path()) };
+        setup_password_file(password);
+
+        let app = create_service().await;
 
         let encoded_password = BASE64_STANDARD.encode(format!(":{password}"));
 
@@ -414,12 +414,10 @@ pub mod tests {
 
     #[tokio::test]
     async fn middleware_invalid_user_credentials_should_return_unauthorized_error() {
-        let app = create_service().await;
-
         let password = "some-password";
-        let config_path = create_password_file(password);
-        // TODO: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("CONFIG_PATH", config_path.path()) };
+        setup_password_file(password);
+
+        let app = create_service().await;
 
         let encoded_password = BASE64_STANDARD.encode(":some-other-password");
 
@@ -436,7 +434,7 @@ pub mod tests {
     async fn verify_correct_token_should_succeed() {
         let claim = generate_valid_claim();
         let token = generate_token(claim);
-        let token_manager = TokenManager::new(common::centrifugo_config().client_token.as_str());
+        let token_manager = TokenManager::new(AppConfig::get().centrifugo.client_token.as_str());
 
         assert!(token_manager.verify_token(token.as_str()));
     }
@@ -445,7 +443,7 @@ pub mod tests {
     async fn verify_expired_token_should_fail() {
         let claim = generate_expired_claim();
         let token = generate_token(claim);
-        let token_manager = TokenManager::new(common::centrifugo_config().client_token.as_str());
+        let token_manager = TokenManager::new(AppConfig::get().centrifugo.client_token.as_str());
 
         assert!(!token_manager.verify_token(token.as_str()));
     }
@@ -454,7 +452,7 @@ pub mod tests {
     async fn verify_token_with_invalid_subject_should_fail() {
         let claim = generate_unset_subject_claim();
         let token = generate_token(claim);
-        let token_manager = TokenManager::new(common::centrifugo_config().client_token.as_str());
+        let token_manager = TokenManager::new(AppConfig::get().centrifugo.client_token.as_str());
 
         assert!(!token_manager.verify_token(token.as_str()));
 
@@ -469,7 +467,7 @@ pub mod tests {
         let claim = generate_invalid_subject_claim();
         let _ = generate_token(claim);
         let token = "someinvalidtestbytes".to_string();
-        let token_manager = TokenManager::new(common::centrifugo_config().client_token.as_str());
+        let token_manager = TokenManager::new(AppConfig::get().centrifugo.client_token.as_str());
 
         assert!(!token_manager.verify_token(token.as_str()));
     }

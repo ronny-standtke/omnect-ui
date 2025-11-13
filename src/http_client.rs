@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
-use reqwest::Client;
+use anyhow::{Context, Result, ensure};
+use reqwest::{Client, Response};
 use std::path::Path;
 
 /// Create a Unix socket client for local service communication
@@ -36,6 +36,33 @@ pub fn unix_socket_client(socket_path: &str) -> Result<Client> {
         .unix_socket(socket_path)
         .build()
         .context("failed to create Unix socket HTTP client")
+}
+
+/// Handle HTTP response by checking status and extracting body
+///
+/// This is a common utility for processing HTTP responses.
+/// It ensures the response status is successful and extracts the body text.
+///
+/// # Arguments
+/// * `res` - The HTTP response to handle
+/// * `context_msg` - Context message describing the request (e.g., "certificate request")
+///
+/// # Returns
+/// * `Ok(String)` - The response body if the status is successful
+/// * `Err` - If the status is not successful or reading the body fails
+pub async fn handle_http_response(res: Response, context_msg: &str) -> Result<String> {
+    let status = res.status();
+    let body = res.text().await.context("failed to read response body")?;
+
+    ensure!(
+        status.is_success(),
+        "{} failed with status {} and body: {}",
+        context_msg,
+        status,
+        body
+    );
+
+    Ok(body)
 }
 
 #[cfg(test)]

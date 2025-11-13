@@ -1,7 +1,7 @@
 mod api;
 mod auth;
 mod certificate;
-mod common;
+mod config;
 mod http_client;
 mod keycloak_client;
 mod middleware;
@@ -12,7 +12,7 @@ use crate::{
     api::Api,
     auth::TokenManager,
     certificate::{CreateCertPayload, create_module_certificate},
-    common::{centrifugo_config, centrifugo_publish_endpoint, config_path},
+    config::AppConfig,
     keycloak_client::KeycloakProvider,
     network::NetworkConfigService,
     omnect_device_service_client::{
@@ -37,7 +37,7 @@ use anyhow::Result;
 use env_logger::{Builder, Env, Target};
 use log::{debug, error, info};
 use rustls::crypto::{CryptoProvider, ring::default_provider};
-use std::{fs, io::Write};
+use std::io::Write;
 use tokio::{
     process::{Child, Command},
     signal::unix::{SignalKind, signal},
@@ -104,13 +104,7 @@ fn initialize() {
 
     CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
 
-    let Ok(true) = fs::exists("/data") else {
-        panic!("failed to find required data directory: /data is missing");
-    };
-
-    fs::create_dir_all(config_path!()).expect("failed to create config directory");
-
-    common::create_frontend_config_file().expect("failed to create frontend config file");
+    KeycloakProvider::create_frontend_config_file().expect("failed to create frontend config file");
 }
 
 async fn run_until_shutdown(
@@ -124,7 +118,7 @@ async fn run_until_shutdown(
         .with_certificate_setup(|payload: CreateCertPayload| async move {
             create_module_certificate(payload).await
         })
-        .with_publish_endpoint(centrifugo_publish_endpoint())
+        .with_publish_endpoint(AppConfig::get().centrifugo.publish_endpoint.clone())
         .build()
         .await
         .expect("failed to create device service client");
@@ -196,15 +190,10 @@ async fn run_server(
         error!("failed to check pending rollback: {e:#}");
     }
 
-    let ui_port = std::env::var("UI_PORT")
-        .expect("failed to read UI_PORT environment variable")
-        .parse::<u64>()
-        .expect("failed to parse UI_PORT: invalid format");
-
+    let config = &AppConfig::get();
+    let ui_port = config.ui.port;
     let session_key = Key::generate();
-
-    // Create TokenManager with centrifugo client token
-    let token_manager = TokenManager::new(&centrifugo_config().client_token);
+    let token_manager = TokenManager::new(&config.centrifugo.client_token);
 
     let server = HttpServer::new(move || {
         App::new()
@@ -300,6 +289,7 @@ async fn run_server(
 }
 
 fn run_centrifugo() -> Child {
+    let config = AppConfig::get();
     let centrifugo = Command::new(
         std::fs::canonicalize("centrifugo").expect("failed to find centrifugo binary"),
     )
@@ -308,24 +298,21 @@ fn run_centrifugo() -> Child {
     .envs(vec![
         (
             "CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM",
-            certificate::cert_path(),
+            config.certificate.cert_path.to_string_lossy().to_string(),
         ),
         (
             "CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM",
-            certificate::key_path(),
+            config.certificate.key_path.to_string_lossy().to_string(),
         ),
         (
             "CENTRIFUGO_HTTP_SERVER_PORT",
-            centrifugo_config().port.clone(),
+            config.centrifugo.port.clone(),
         ),
         (
             "CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY",
-            centrifugo_config().client_token.clone(),
+            config.centrifugo.client_token.clone(),
         ),
-        (
-            "CENTRIFUGO_HTTP_API_KEY",
-            centrifugo_config().api_key.clone(),
-        ),
+        ("CENTRIFUGO_HTTP_API_KEY", config.centrifugo.api_key.clone()),
     ])
     .spawn()
     .expect("failed to spawn centrifugo process");
@@ -341,11 +328,12 @@ fn run_centrifugo() -> Child {
 }
 
 fn load_tls_config() -> rustls::ServerConfig {
+    let paths = &AppConfig::get().certificate;
     let mut tls_certs = std::io::BufReader::new(
-        std::fs::File::open(certificate::cert_path()).expect("failed to read certificate file"),
+        std::fs::File::open(&paths.cert_path).expect("failed to read certificate file"),
     );
     let mut tls_key = std::io::BufReader::new(
-        std::fs::File::open(certificate::key_path()).expect("failed to read key file"),
+        std::fs::File::open(&paths.key_path).expect("failed to read key file"),
     );
 
     let tls_certs = rustls_pemfile::certs(&mut tls_certs)

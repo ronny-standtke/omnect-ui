@@ -1,7 +1,11 @@
 #![cfg_attr(feature = "mock", allow(dead_code, unused_imports))]
 
-use crate::{certificate::CreateCertPayload, http_client};
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use crate::{
+    certificate::CreateCertPayload,
+    config::AppConfig,
+    http_client::{handle_http_response, unix_socket_client},
+};
+use anyhow::{Context, Result, anyhow, bail};
 use log::info;
 #[cfg(feature = "mock")]
 use mockall::automock;
@@ -9,7 +13,7 @@ use reqwest::Client;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::{env, fmt::Debug, sync::OnceLock};
+use std::{env, fmt::Debug, path::PathBuf, sync::OnceLock};
 use trait_variant::make;
 
 #[derive(Clone, Debug, Default, Deserialize_repr, PartialEq, Serialize_repr)]
@@ -30,7 +34,7 @@ pub struct FactoryReset {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoadUpdate {
-    pub update_file_path: String,
+    pub update_file_path: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -96,13 +100,13 @@ pub struct HealthcheckInfo {
     pub update_validation_status: UpdateValidationStatus,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct HeaderKeyValue {
     pub name: String,
     pub value: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PublishEndpoint {
     pub url: String,
     pub headers: Vec<HeaderKeyValue>,
@@ -149,9 +153,12 @@ impl OmnectDeviceServiceClientBuilder {
     }
 
     pub async fn build(self) -> Result<OmnectDeviceServiceClient> {
-        let socket_path =
-            env::var("SOCKET_PATH").unwrap_or_else(|_| "/socket/api.sock".to_string());
-        let client = http_client::unix_socket_client(&socket_path)?;
+        let client = unix_socket_client(
+            &AppConfig::get()
+                .device_service
+                .socket_path
+                .to_string_lossy(),
+        )?;
 
         let mut omnect_client = OmnectDeviceServiceClient {
             client,
@@ -240,7 +247,7 @@ impl OmnectDeviceServiceClient {
             .await
             .context(format!("failed to send GET request to {url}"))?;
 
-        self.handle_response(res, &url).await
+        handle_http_response(res, &format!("GET {url}")).await
     }
 
     /// POST request to the device service API (empty body)
@@ -255,7 +262,7 @@ impl OmnectDeviceServiceClient {
             .await
             .context(format!("failed to send POST request to {url}"))?;
 
-        self.handle_response(res, &url).await
+        handle_http_response(res, &format!("POST {url}")).await
     }
 
     /// POST request to the device service API with JSON body
@@ -271,19 +278,7 @@ impl OmnectDeviceServiceClient {
             .await
             .context(format!("failed to send POST request to {url}"))?;
 
-        self.handle_response(res, &url).await
-    }
-
-    async fn handle_response(&self, res: reqwest::Response, url: &str) -> Result<String> {
-        let status = res.status();
-        let body = res.text().await.context("failed to read response body")?;
-
-        ensure!(
-            status.is_success(),
-            "request to {url} failed with status {status} and body: {body}",
-        );
-
-        Ok(body)
+        handle_http_response(res, &format!("POST {url}")).await
     }
 }
 

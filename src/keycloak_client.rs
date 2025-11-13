@@ -1,3 +1,4 @@
+use crate::config::AppConfig;
 use anyhow::{Context, Result};
 use base64::{Engine, prelude::BASE64_STANDARD};
 use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
@@ -19,43 +20,38 @@ struct RealmInfo {
     public_key: String,
 }
 
-macro_rules! keycloak_url {
-    () => {{
-        std::env::var("KEYCLOAK_URL").unwrap_or_else(|_| {
-            "https://keycloak.omnect.conplement.cloud/realms/cp-prod".to_string()
-        })
-    }};
-}
-
 #[make(Send + Sync)]
 #[cfg_attr(feature = "mock", automock)]
 pub trait SingleSignOnProvider {
     async fn verify_token(&self, token: &str) -> anyhow::Result<TokenClaims>;
 }
 
-#[derive(Clone)]
-pub struct KeycloakProvider {
-    client: reqwest::Client,
-}
-
-impl Default for KeycloakProvider {
-    fn default() -> Self {
-        Self {
-            client: Client::new(),
-        }
-    }
-}
+#[derive(Clone, Default)]
+pub struct KeycloakProvider;
 
 impl KeycloakProvider {
-    pub fn config() -> String {
-        let keycloak_url = &keycloak_url!();
-        format!("window.__APP_CONFIG__ = {{KEYCLOAK_URL:\"{keycloak_url}\"}};")
+    pub fn create_frontend_config_file() -> Result<()> {
+        use anyhow::Context;
+        use std::io::Write;
+
+        let mut config_file = std::fs::File::create(&AppConfig::get().paths.app_config_path)
+            .context("failed to create frontend config file")?;
+
+        config_file
+            .write_all(
+                format!(
+                    "window.__APP_CONFIG__ = {{KEYCLOAK_URL:\"{}\"}};",
+                    AppConfig::get().keycloak.url
+                )
+                .as_bytes(),
+            )
+            .context("failed to write frontend config file")
     }
 
     async fn realm_public_key(&self) -> Result<RS256PublicKey> {
-        let resp = self
-            .client
-            .get(keycloak_url!())
+        let client = Client::new();
+        let resp = client
+            .get(&AppConfig::get().keycloak.url)
             .send()
             .await
             .context("failed to fetch from url")?
