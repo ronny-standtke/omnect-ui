@@ -1,22 +1,22 @@
 mod api;
-mod auth;
-mod certificate;
 mod config;
 mod http_client;
 mod keycloak_client;
 mod middleware;
-mod network;
 mod omnect_device_service_client;
+mod services;
 
 use crate::{
     api::Api,
-    auth::TokenManager,
-    certificate::{CreateCertPayload, create_module_certificate},
     config::AppConfig,
     keycloak_client::KeycloakProvider,
-    network::NetworkConfigService,
     omnect_device_service_client::{
         DeviceServiceClient, OmnectDeviceServiceClient, OmnectDeviceServiceClientBuilder,
+    },
+    services::{
+        auth::TokenManager,
+        certificate::{CertificateService, CreateCertPayload},
+        network::NetworkConfigService,
     },
 };
 use actix_cors::Cors;
@@ -116,7 +116,7 @@ async fn run_until_shutdown(
     let mut centrifugo = run_centrifugo();
     let service_client = OmnectDeviceServiceClientBuilder::new()
         .with_certificate_setup(|payload: CreateCertPayload| async move {
-            create_module_certificate(payload).await
+            CertificateService::create_module_certificate(payload).await
         })
         .with_publish_endpoint(AppConfig::get().centrifugo.publish_endpoint.clone())
         .build()
@@ -186,7 +186,7 @@ async fn run_server(
 
     let tls_config = load_tls_config();
 
-    if let Err(e) = network::NetworkConfigService::process_pending_rollback(&service_client).await {
+    if let Err(e) = NetworkConfigService::process_pending_rollback(&service_client).await {
         error!("failed to check pending rollback: {e:#}");
     }
 
@@ -242,7 +242,9 @@ async fn run_server(
             )
             .route(
                 "/update/file",
-                web::post().to(UiApi::save_file).wrap(middleware::AuthMw),
+                web::post()
+                    .to(UiApi::upload_firmware_file)
+                    .wrap(middleware::AuthMw),
             )
             .route(
                 "/update/load",

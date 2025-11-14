@@ -1,4 +1,6 @@
+use actix_web::HttpResponse;
 use anyhow::{Context, Result, ensure};
+use log::error;
 use reqwest::{Client, Response};
 use std::path::Path;
 
@@ -25,17 +27,58 @@ pub fn unix_socket_client(socket_path: &str) -> Result<Client> {
     let socket_path = Path::new(socket_path.strip_prefix("unix://").unwrap_or(socket_path));
 
     // Verify the socket path exists
-    if !socket_path
-        .try_exists()
-        .context("failed to check if socket path exists")?
-    {
-        anyhow::bail!("failed since socket path does not exist: {socket_path:?}");
-    }
+    ensure!(
+        socket_path
+            .try_exists()
+            .context("failed to check if socket path exists")?,
+        "failed since socket path does not exist: {socket_path:?}"
+    );
 
     Client::builder()
         .unix_socket(socket_path)
         .build()
         .context("failed to create Unix socket HTTP client")
+}
+
+/// Trait for converting service results into HTTP responses
+pub trait ServiceResultResponse {
+    fn into_response(self) -> HttpResponse;
+}
+
+impl ServiceResultResponse for () {
+    fn into_response(self) -> HttpResponse {
+        HttpResponse::Ok().finish()
+    }
+}
+
+impl ServiceResultResponse for String {
+    fn into_response(self) -> HttpResponse {
+        HttpResponse::Ok().body(self)
+    }
+}
+
+/// Handle Result and extracting convert data to Response
+///
+/// This is a common utility for processing Results and transform to HTTP responses.
+/// It ensures the Result status is successful and and puts data or the error in a corresponding Response.
+///
+/// # Arguments
+/// * `result` - The Result to handle
+/// * `operation` - Context message describing the operation
+///
+/// # Returns
+/// * `HttpResponse` - The ServiceResultResponse (HttpResponse::Ok or HttpResponse::InternalServerError)
+pub fn handle_service_result<T>(result: Result<T>, operation: &str) -> HttpResponse
+where
+    T: ServiceResultResponse,
+{
+    match result {
+        Ok(data) => data.into_response(),
+        Err(e) => {
+            error!("{operation} failed: {e:#}");
+            HttpResponse::InternalServerError().body(e.to_string())
+        }
+    }
 }
 
 /// Handle HTTP response by checking status and extracting body
@@ -56,10 +99,7 @@ pub async fn handle_http_response(res: Response, context_msg: &str) -> Result<St
 
     ensure!(
         status.is_success(),
-        "{} failed with status {} and body: {}",
-        context_msg,
-        status,
-        body
+        "{context_msg} failed with status {status} and body: {body}"
     );
 
     Ok(body)

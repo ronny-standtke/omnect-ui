@@ -1,4 +1,4 @@
-use crate::auth::{TokenManager, validate_password};
+use crate::services::auth::{TokenManager, password::PasswordService};
 use actix_session::SessionExt;
 use actix_web::{
     Error, FromRequest, HttpMessage, HttpResponse,
@@ -99,7 +99,7 @@ fn verify_user(auth: BasicAuth) -> bool {
         return false;
     };
 
-    if let Err(e) = validate_password(password) {
+    if let Err(e) = PasswordService::validate_password(password) {
         error!("verify_user() failed: {e:#}");
         return false;
     }
@@ -134,14 +134,10 @@ pub mod tests {
         test, web,
     };
     use actix_web_httpauth::headers::authorization::Basic;
-    use argon2::{
-        Argon2,
-        password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
-    };
     use base64::prelude::*;
     use jwt_simple::claims::{JWTClaims, NoCustomClaims};
     use jwt_simple::prelude::*;
-    use std::{collections::HashMap, fs::File, io::Write};
+    use std::collections::HashMap;
 
     fn generate_valid_claim() -> JWTClaims<NoCustomClaims> {
         let issued_at = Clock::now_since_epoch();
@@ -378,19 +374,8 @@ pub mod tests {
     }
 
     fn setup_password_file(password: &str) {
-        use crate::config::AppConfig;
-
-        let argon2 = Argon2::default();
-        let salt = SaltString::generate(&mut OsRng);
-        let hashed_password = argon2.hash_password(password.as_bytes(), &salt).unwrap();
-
-        let password_file = &AppConfig::get().paths.password_file;
-        let config_dir = password_file.parent().unwrap();
-        std::fs::create_dir_all(config_dir).unwrap();
-        let mut file = File::create(password_file).unwrap();
-
-        file.write_all(hashed_password.to_string().as_bytes())
-            .unwrap();
+        PasswordService::store_or_update_password(password)
+            .expect("failed to setup password file for test");
     }
 
     #[tokio::test]

@@ -1,5 +1,5 @@
 use crate::omnect_device_service_client::DeviceServiceClient;
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use ini::Ini;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
@@ -113,10 +113,6 @@ struct PendingRollback {
 pub struct NetworkConfigService;
 
 impl NetworkConfigService {
-    // ========================================================================
-    // Public methods
-    // ========================================================================
-
     /// Setup the server restart channel and return a receiver for restart signals
     ///
     /// # Returns
@@ -196,13 +192,9 @@ impl NetworkConfigService {
         let config_file = network_config_file!(network.name);
         let backup_file = network_backup_file!(network.name);
 
-        Self::try_rename_if_exists(&backup_file, &config_file)?;
+        Self::rename_if_exists(&backup_file, &config_file)?;
         Ok(())
     }
-
-    // ========================================================================
-    // Private helper methods
-    // ========================================================================
 
     /// Atomically copy a file if it exists
     ///
@@ -212,7 +204,7 @@ impl NetworkConfigService {
     ///
     /// # Returns
     /// Result with bool indicating if copy happened (true) or source didn't exist (false)
-    fn try_copy_if_exists(src: &Path, dest: &Path) -> Result<bool> {
+    fn copy_if_exists(src: &Path, dest: &Path) -> Result<bool> {
         match fs::copy(src, dest) {
             Ok(_) => Ok(true),
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
@@ -228,7 +220,7 @@ impl NetworkConfigService {
     ///
     /// # Returns
     /// Result with bool indicating if rename happened (true) or source didn't exist (false)
-    fn try_rename_if_exists(src: &Path, dest: &Path) -> Result<bool> {
+    fn rename_if_exists(src: &Path, dest: &Path) -> Result<bool> {
         match fs::rename(src, dest) {
             Ok(_) => Ok(true),
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
@@ -286,7 +278,7 @@ impl NetworkConfigService {
         let config_file = network_config_file!(&network.name);
         let backup_file = network_backup_file!(&network.name);
 
-        if !Self::try_copy_if_exists(&config_file, &backup_file)? {
+        if !Self::copy_if_exists(&config_file, &backup_file)? {
             let status = service_client
                 .status()
                 .await
@@ -307,10 +299,8 @@ impl NetworkConfigService {
 
             let config_file = network_path!(file_name);
             log::debug!("config file is {config_file:?}");
-            ensure!(
-                Self::try_copy_if_exists(&config_file, &backup_file)?,
-                "failed to backup config"
-            );
+
+            Self::copy_if_exists(&config_file, &backup_file)?;
         }
 
         Ok(())
