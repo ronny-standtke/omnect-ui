@@ -42,6 +42,7 @@ pub struct CentrifugoConfig {
     pub client_token: String,
     pub api_key: String,
     pub publish_endpoint: crate::omnect_device_service_client::PublishEndpoint,
+    pub log_level: String,
 }
 
 #[derive(Clone, Debug)]
@@ -146,6 +147,7 @@ impl UiConfig {
 impl CentrifugoConfig {
     fn load() -> Result<Self> {
         let port = env::var("CENTRIFUGO_HTTP_SERVER_PORT").unwrap_or_else(|_| "8000".to_string());
+        let log_level = env::var("CENTRIFUGO_LOG_LEVEL").unwrap_or_else(|_| "none".to_string());
 
         // Generate unique tokens for this instance
         let client_token = Uuid::new_v4().to_string();
@@ -170,6 +172,7 @@ impl CentrifugoConfig {
             client_token,
             api_key,
             publish_endpoint,
+            log_level,
         })
     }
 }

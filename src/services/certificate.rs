@@ -78,21 +78,21 @@ impl CertificateService {
             .json(&payload)
             .send()
             .await
-            .context("failed to send certificate request to IoT Edge workload API")?;
+            .context("failed to send certificate request")?;
 
         let body = handle_http_response(res, "certificate request").await?;
         let response: CreateCertResponse =
-            serde_json::from_str(&body).context("failed to parse CreateCertResponse")?;
+            serde_json::from_str(&body).context("failed to parse certificate response")?;
         let paths = &AppConfig::get().certificate;
-        let mut cert_file = File::create(&paths.cert_path).context("failed to create cert file")?;
+        let mut cert_file = File::create(&paths.cert_path).context("failed to create certificate file")?;
         let mut key_file = File::create(&paths.key_path).context("failed to create key file")?;
 
         cert_file
             .write_all(response.certificate.as_bytes())
-            .context("failed to write certificate to file")?;
+            .context("failed to write certificate")?;
 
         key_file
             .write_all(response.private_key.bytes.as_bytes())
-            .context("failed to write private key to file")
+            .context("failed to write private key")
     }
 }

@@ -10,9 +10,7 @@ use crate::{
     api::Api,
     config::AppConfig,
     keycloak_client::KeycloakProvider,
-    omnect_device_service_client::{
-        DeviceServiceClient, OmnectDeviceServiceClient, OmnectDeviceServiceClientBuilder,
-    },
+    omnect_device_service_client::{DeviceServiceClient, OmnectDeviceServiceClient},
     services::{
         auth::TokenManager,
         certificate::{CertificateService, CreateCertPayload},
@@ -33,9 +31,9 @@ use actix_web::{
     cookie::{Key, SameSite},
     web::{self, Data},
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use env_logger::{Builder, Env, Target};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use rustls::crypto::{CryptoProvider, ring::default_provider};
 use std::io::Write;
 use tokio::{
@@ -65,17 +63,32 @@ impl std::fmt::Display for ShutdownReason {
 
 #[actix_web::main]
 async fn main() {
-    initialize();
-
-    let mut restart_rx =
-        NetworkConfigService::setup_restart_receiver().expect("failed to setup restart receiver");
-
-    let mut sigterm = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
-
-    while let ShutdownReason::Restart = run_until_shutdown(&mut restart_rx, &mut sigterm).await {}
+    if let Err(e) = run().await {
+        error!("application error: {e:#}");
+        std::process::exit(1);
+    }
 }
 
-fn initialize() {
+async fn run() -> Result<()> {
+    initialize()?;
+
+    let mut restart_rx = NetworkConfigService::setup_restart_receiver()
+        .map_err(|_| anyhow::anyhow!("restart receiver already initialized"))?;
+
+    let mut sigterm =
+        signal(SignalKind::terminate()).context("failed to install SIGTERM handler")?;
+
+    let mut service_client =
+        OmnectDeviceServiceClient::new().context("failed to create device service client")?;
+
+    while let ShutdownReason::Restart =
+        run_until_shutdown(&mut service_client, &mut restart_rx, &mut sigterm).await?
+    {}
+
+    Ok(())
+}
+
+fn initialize() -> Result<()> {
     log_panics::init();
 
     let mut builder = if cfg!(debug_assertions) {
@@ -102,27 +115,54 @@ fn initialize() {
         env!("GIT_SHORT_REV")
     );
 
-    CryptoProvider::install_default(default_provider()).expect("failed to install crypto provider");
+    CryptoProvider::install_default(default_provider())
+        .map_err(|_| anyhow::anyhow!("crypto provider already installed"))?;
 
-    KeycloakProvider::create_frontend_config_file().expect("failed to create frontend config file");
+    KeycloakProvider::create_frontend_config_file()
+        .context("failed to create frontend config file")?;
+
+    if NetworkConfigService::rollback_exists() {
+        warn!("unexpectedly started with pending network rollback");
+    }
+
+    Ok(())
 }
 
 async fn run_until_shutdown(
+    service_client: &mut OmnectDeviceServiceClient,
     restart_rx: &mut broadcast::Receiver<()>,
     sigterm: &mut tokio::signal::unix::Signal,
-) -> ShutdownReason {
-    info!("starting server...");
+) -> Result<ShutdownReason> {
+    info!("starting server");
 
-    let mut centrifugo = run_centrifugo();
-    let service_client = OmnectDeviceServiceClientBuilder::new()
-        .with_certificate_setup(|payload: CreateCertPayload| async move {
-            CertificateService::create_module_certificate(payload).await
-        })
-        .with_publish_endpoint(AppConfig::get().centrifugo.publish_endpoint.clone())
-        .build()
+    // 1. create the cert with the ip in CommonName
+    let ip_address = service_client
+        .ip_address()
         .await
-        .expect("failed to create device service client");
-    let (server_handle, server_task) = run_server(service_client.clone()).await;
+        .context("failed to get IP address")?;
+
+    CertificateService::create_module_certificate(CreateCertPayload {
+        common_name: ip_address,
+    })
+    .await
+    .context("failed to create certificate")?;
+
+    // 2. run centrifugo with valid cert
+    let mut centrifugo = run_centrifugo().context("failed to start centrifugo")?;
+
+    // 3. register publish endpoint with running centrifugo
+    if !service_client.has_publish_endpoint {
+        service_client
+            .register_publish_endpoint(AppConfig::get().centrifugo.publish_endpoint.clone())
+            .await
+            .context("failed to register publish endpoint")?;
+    }
+
+    let (server_handle, server_task) = run_server(service_client.clone()).await?;
+
+    if let Err(e) = NetworkConfigService::process_pending_rollback(service_client).await {
+        error!("failed to process pending rollback: {e:#}");
+    }
 
     let reason = tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -151,49 +191,39 @@ async fn run_until_shutdown(
         }
     };
 
-    // Unified cleanup sequence
-    info!("{reason}...");
+    info!("{reason}");
 
-    // 1. Shutdown service client (unregister from omnect-device-service)
-    if let Err(e) = service_client.shutdown().await {
-        error!("failed to shutdown service client: {e:#}");
-    }
-
-    // 2. Stop the server gracefully
     server_handle.stop(true).await;
-
-    // 3. Kill centrifugo
     if let Err(e) = centrifugo.kill().await {
         error!("failed to kill centrifugo: {e:#}");
     }
 
     if matches!(reason, ShutdownReason::Shutdown) {
+        if let Err(e) = service_client.shutdown().await {
+            error!("failed to shutdown service client: {e:#}");
+        }
         info!("shutdown complete");
     }
 
-    reason
+    Ok(reason)
 }
 
 async fn run_server(
     service_client: OmnectDeviceServiceClient,
-) -> (
+) -> Result<(
     ServerHandle,
     tokio::task::JoinHandle<Result<(), std::io::Error>>,
-) {
+)> {
     let api = UiApi::new(service_client.clone(), Default::default())
         .await
-        .expect("failed to create api");
+        .context("failed to create api")?;
 
-    let tls_config = load_tls_config();
-
-    if let Err(e) = NetworkConfigService::process_pending_rollback(&service_client).await {
-        error!("failed to check pending rollback: {e:#}");
-    }
-
+    let tls_config = load_tls_config().context("failed to load tls config")?;
     let config = &AppConfig::get();
     let ui_port = config.ui.port;
     let session_key = Key::generate();
     let token_manager = TokenManager::new(&config.centrifugo.client_token);
+    let static_path = std::fs::canonicalize("static").context("failed to find static folder")?;
 
     let server = HttpServer::new(move || {
         App::new()
@@ -276,84 +306,86 @@ async fn run_server(
             .route("/logout", web::post().to(UiApi::logout))
             .route("/healthcheck", web::get().to(UiApi::healthcheck))
             .route("/network", web::post().to(UiApi::set_network_config))
-            .service(Files::new(
-                "/static",
-                std::fs::canonicalize("static").expect("failed to find static folder"),
-            ))
+            .service(Files::new("/static", static_path.clone()))
             .default_service(web::route().to(UiApi::index))
     })
     .bind_rustls_0_23(format!("0.0.0.0:{ui_port}"), tls_config)
-    .expect("failed to bind server with TLS")
+    .context("failed to bind server")?
     .disable_signals()
     .run();
 
-    (server.handle(), tokio::spawn(server))
+    Ok((server.handle(), tokio::spawn(server)))
 }
 
-fn run_centrifugo() -> Child {
-    let config = AppConfig::get();
-    let centrifugo = Command::new(
-        std::fs::canonicalize("centrifugo").expect("failed to find centrifugo binary"),
-    )
-    .arg("-c")
-    .arg("/centrifugo_config.json")
-    .envs(vec![
-        (
-            "CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM",
-            config.certificate.cert_path.to_string_lossy().to_string(),
-        ),
-        (
-            "CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM",
-            config.certificate.key_path.to_string_lossy().to_string(),
-        ),
-        (
-            "CENTRIFUGO_HTTP_SERVER_PORT",
-            config.centrifugo.port.clone(),
-        ),
-        (
-            "CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY",
-            config.centrifugo.client_token.clone(),
-        ),
-        ("CENTRIFUGO_HTTP_API_KEY", config.centrifugo.api_key.clone()),
-    ])
-    .spawn()
-    .expect("failed to spawn centrifugo process");
+fn run_centrifugo() -> Result<Child> {
+    let config = &AppConfig::get().centrifugo;
+    let certificate = &AppConfig::get().certificate;
+    let centrifugo_path =
+        std::fs::canonicalize("centrifugo").context("failed to find centrifugo binary")?;
+
+    let centrifugo = Command::new(centrifugo_path)
+        .arg("-c")
+        .arg("/centrifugo_config.json")
+        .envs(vec![
+            (
+                "CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM",
+                certificate.cert_path.to_string_lossy().to_string(),
+            ),
+            (
+                "CENTRIFUGO_HTTP_SERVER_TLS_KEY_PEM",
+                certificate.key_path.to_string_lossy().to_string(),
+            ),
+            ("CENTRIFUGO_HTTP_SERVER_PORT", config.port.clone()),
+            (
+                "CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY",
+                config.client_token.clone(),
+            ),
+            ("CENTRIFUGO_HTTP_API_KEY", config.api_key.clone()),
+            ("CENTRIFUGO_LOG_LEVEL", config.log_level.clone()),
+        ])
+        .spawn()
+        .context("failed to spawn centrifugo process")?;
 
     info!(
         "centrifugo pid: {}",
         centrifugo
             .id()
-            .expect("failed to get centrifugo process id")
+            .context("failed to get centrifugo process id")?
     );
 
-    centrifugo
+    Ok(centrifugo)
 }
 
-fn load_tls_config() -> rustls::ServerConfig {
+fn load_tls_config() -> Result<rustls::ServerConfig> {
     let paths = &AppConfig::get().certificate;
+
     let mut tls_certs = std::io::BufReader::new(
-        std::fs::File::open(&paths.cert_path).expect("failed to read certificate file"),
+        std::fs::File::open(&paths.cert_path).context("failed to open certificate file")?,
     );
+
     let mut tls_key = std::io::BufReader::new(
-        std::fs::File::open(&paths.key_path).expect("failed to read key file"),
+        std::fs::File::open(&paths.key_path).context("failed to open key file")?,
     );
 
     let tls_certs = rustls_pemfile::certs(&mut tls_certs)
         .collect::<Result<Vec<_>, _>>()
-        .expect("failed to parse cert pem");
+        .context("failed to parse certificate pem")?;
 
-    match rustls_pemfile::read_one(&mut tls_key)
-        .expect("failed to read key pem file")
-        .expect("failed to parse key pem file: no valid key found")
-    {
+    let key_item = rustls_pemfile::read_one(&mut tls_key)
+        .context("failed to read key pem file")?
+        .context("no valid key found in pem file")?;
+
+    let config = match key_item {
         rustls_pemfile::Item::Pkcs1Key(key) => rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(tls_certs, rustls::pki_types::PrivateKeyDer::Pkcs1(key))
-            .expect("failed to create TLS config"),
+            .context("failed to create tls config with pkcs1 key")?,
         rustls_pemfile::Item::Pkcs8Key(key) => rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(tls_certs, rustls::pki_types::PrivateKeyDer::Pkcs8(key))
-            .expect("failed to create TLS config"),
-        _ => panic!("failed to parse key pem file: unexpected item type found"),
-    }
+            .context("failed to create tls config with pkcs8 key")?,
+        _ => anyhow::bail!("unexpected key type in pem file"),
+    };
+
+    Ok(config)
 }

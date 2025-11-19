@@ -73,7 +73,7 @@ pub struct NetworkStatus {
 pub struct NetworkInterface {
     pub online: bool,
     pub ipv4: Ipv4Info,
-    pub file: String,
+    pub file: PathBuf,
     pub name: String,
 }
 
@@ -121,65 +121,7 @@ struct PublishIdEndpoint {
 #[derive(Clone)]
 pub struct OmnectDeviceServiceClient {
     client: Client,
-    has_publish_endpoint: bool,
-}
-
-type CertSetupFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>>>>;
-type CertSetupFn = Box<dyn FnOnce(CreateCertPayload) -> CertSetupFuture>;
-
-#[derive(Default)]
-pub struct OmnectDeviceServiceClientBuilder {
-    publish_endpoint: Option<PublishEndpoint>,
-    certificate_setup: Option<CertSetupFn>,
-}
-
-impl OmnectDeviceServiceClientBuilder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_publish_endpoint(mut self, endpoint: PublishEndpoint) -> Self {
-        self.publish_endpoint = Some(endpoint);
-        self
-    }
-
-    pub fn with_certificate_setup<F, Fut>(mut self, setup_fn: F) -> Self
-    where
-        F: FnOnce(CreateCertPayload) -> Fut + 'static,
-        Fut: std::future::Future<Output = Result<()>> + 'static,
-    {
-        self.certificate_setup = Some(Box::new(move |payload| Box::pin(setup_fn(payload))));
-        self
-    }
-
-    pub async fn build(self) -> Result<OmnectDeviceServiceClient> {
-        let client = unix_socket_client(
-            &AppConfig::get()
-                .device_service
-                .socket_path
-                .to_string_lossy(),
-        )?;
-
-        let mut omnect_client = OmnectDeviceServiceClient {
-            client,
-            has_publish_endpoint: false,
-        };
-
-        // Setup certificate if provided
-        if let Some(setup_fn) = self.certificate_setup {
-            let common_name = omnect_client.ip_address().await?;
-            let payload = CreateCertPayload { common_name };
-            setup_fn(payload).await?;
-        }
-
-        // Register publish endpoint if provided
-        if let Some(endpoint) = self.publish_endpoint {
-            omnect_client.register_publish_endpoint(endpoint).await?;
-            omnect_client.has_publish_endpoint = true;
-        }
-
-        Ok(omnect_client)
-    }
+    pub has_publish_endpoint: bool,
 }
 
 #[make(Send)]
@@ -191,6 +133,7 @@ pub trait DeviceServiceClient {
     async fn republish(&self) -> Result<()>;
     async fn factory_reset(&self, factory_reset: FactoryReset) -> Result<()>;
     async fn reboot(&self) -> Result<()>;
+    async fn register_publish_endpoint(&mut self, endpoint: PublishEndpoint) -> Result<()>;
     async fn reload_network(&self) -> Result<()>;
     async fn load_update(&self, load_update: LoadUpdate) -> Result<String>;
     async fn run_update(&self, run_update: RunUpdate) -> Result<()>;
@@ -211,22 +154,26 @@ impl OmnectDeviceServiceClient {
     const RUN_UPDATE_ENDPOINT: &str = "/fwupdate/run/v1";
     const PUBLISH_ENDPOINT: &str = "/publish-endpoint/v1";
 
+    pub fn new() -> Result<Self> {
+        let client = unix_socket_client(
+            &AppConfig::get()
+                .device_service
+                .socket_path
+                .to_string_lossy(),
+        )?;
+
+        Ok(OmnectDeviceServiceClient {
+            client,
+            has_publish_endpoint: false,
+        })
+    }
+
     fn required_version() -> &'static VersionReq {
         static REQUIRED_VERSION: OnceLock<VersionReq> = OnceLock::new();
         REQUIRED_VERSION.get_or_init(|| {
             VersionReq::parse(Self::REQUIRED_CLIENT_VERSION)
                 .expect("invalid REQUIRED_CLIENT_VERSION constant")
         })
-    }
-
-    async fn register_publish_endpoint(&self, endpoint: PublishEndpoint) -> Result<()> {
-        let publish_id_endpoint = PublishIdEndpoint {
-            id: env!("CARGO_PKG_NAME"),
-            endpoint,
-        };
-        self.post_json(Self::PUBLISH_ENDPOINT, publish_id_endpoint)
-            .await?;
-        Ok(())
     }
 
     fn build_url(&self, path: &str) -> String {
@@ -283,6 +230,19 @@ impl OmnectDeviceServiceClient {
 }
 
 impl DeviceServiceClient for OmnectDeviceServiceClient {
+    async fn register_publish_endpoint(&mut self, endpoint: PublishEndpoint) -> Result<()> {
+        let publish_id_endpoint = PublishIdEndpoint {
+            id: env!("CARGO_PKG_NAME"),
+            endpoint,
+        };
+        self.post_json(Self::PUBLISH_ENDPOINT, publish_id_endpoint)
+            .await?;
+
+        self.has_publish_endpoint = true;
+
+        Ok(())
+    }
+
     async fn fleet_id(&self) -> Result<String> {
         let status = self.status().await?;
 
@@ -336,6 +296,12 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
     }
 
     async fn reload_network(&self) -> Result<()> {
+        use tokio::time::sleep;
+        self.post(Self::RELOAD_NETWORK_ENDPOINT).await?;
+
+        // this is a hack since ods reports same networks after reload
+        // so sleeping for a while and do it again fixes the issue
+        sleep(std::time::Duration::from_secs(5)).await;
         self.post(Self::RELOAD_NETWORK_ENDPOINT).await?;
         Ok(())
     }

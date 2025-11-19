@@ -1,7 +1,7 @@
 use crate::omnect_device_service_client::DeviceServiceClient;
 use anyhow::{Context, Result};
 use ini::Ini;
-use log::{error, info};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_valid::Validate;
 use std::{
@@ -41,25 +41,6 @@ macro_rules! network_rollback_file {
     };
 }
 
-macro_rules! save_rollback {
-    ($rollback:expr) => {
-        (|| -> Result<()> {
-            let rollback_json =
-                serde_json::to_string_pretty($rollback).context("failed to serialize rollback")?;
-            fs::write(network_rollback_file!(), rollback_json)
-                .context("failed to write rollback file")
-        })()
-    };
-}
-
-macro_rules! load_rollback {
-    () => {
-        fs::read_to_string(network_rollback_file!())
-            .ok()
-            .and_then(|contents| serde_json::from_str::<PendingRollback>(&contents).ok())
-    };
-}
-
 macro_rules! clear_rollback {
     () => {
         let _ = fs::remove_file(network_rollback_file!());
@@ -82,7 +63,7 @@ const ROLLBACK_TIMEOUT_SECS: u64 = 90;
 // Structs
 // ============================================================================
 
-#[derive(Deserialize, Serialize, Clone, Validate)]
+#[derive(Deserialize, Serialize, Clone, Validate, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkConfig {
     is_server_addr: bool,
@@ -99,10 +80,10 @@ pub struct NetworkConfig {
     dns: Option<Vec<Ipv4Addr>>,
 }
 
-#[derive(Deserialize, Serialize, Clone)]
-struct PendingRollback {
+#[derive(Deserialize, Serialize, Clone, Debug)]
+struct Rollback {
     network_config: NetworkConfig,
-    rollback_time: SystemTime,
+    deadline: SystemTime,
 }
 
 // ============================================================================
@@ -137,13 +118,15 @@ impl NetworkConfigService {
     where
         T: DeviceServiceClient,
     {
-        network.validate().context("validation failed")?;
+        info!("set network config: {network:?}");
 
-        if let Err(e) = Self::apply_network_config(service_client, network).await {
-            if let Err(err) = Self::rollback_network_config(network) {
-                error!("failed to restore network config: {err:#}");
+        network.validate().context("network validation failed")?;
+
+        if let Err(err1) = Self::apply_network_config(service_client, network).await {
+            if let Err(err2) = Self::rollback_network_config(&network.name) {
+                error!("failed to rollback network config: {err2:#}");
             }
-            return Err(e);
+            return Err(err1);
         }
 
         Ok(())
@@ -160,37 +143,66 @@ impl NetworkConfigService {
     where
         T: DeviceServiceClient,
     {
-        if let Some(pending) = load_rollback!() {
-            if let Ok(remaining_time) = pending.rollback_time.duration_since(SystemTime::now()) {
+        if Self::rollback_exists() {
+            // load rollback
+            let path = network_rollback_file!();
+            let rollback: Rollback = serde_json::from_reader(
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .open(path)
+                    .context(format!("failed to open rollback file: {path:?}"))?,
+            )
+            .context(format!("failed to deserialize rollback: {path:?}"))?;
+
+            // fails if deadline < now
+            if let Ok(remaining_time) = rollback.deadline.duration_since(SystemTime::now()) {
+                info!("pending rollback found: {rollback:?}");
+                info!(
+                    "await cancel rollback within: {}s",
+                    remaining_time.as_secs()
+                );
                 sleep(remaining_time).await;
+                return Box::pin(Self::process_pending_rollback(service_client)).await;
             }
 
-            if load_rollback!().is_some() {
-                Self::execute_rollback(service_client, &pending.network_config, "scheduled").await;
-                clear_rollback!();
-            }
+            info!("rollback: {rollback:?}");
+            Self::rollback_network_config(&rollback.network_config.name)?;
+            service_client.reload_network().await?;
+            Self::trigger_server_restart()?;
+
+            clear_rollback!();
+        } else {
+            info!("no rollback found");
         }
         Ok(())
     }
 
     /// Cancel any pending network configuration rollback
     pub fn cancel_rollback() {
-        if load_rollback!().is_some() {
+        if Self::rollback_exists() {
             clear_rollback!();
             info!("pending network rollback cancelled");
         }
     }
 
+    /// Check if a rollback exists
+    ///
+    /// # Returns
+    /// true if rollback file exists, false otherwise
+    pub fn rollback_exists() -> bool {
+        network_rollback_file!().exists()
+    }
+
     /// Rollback network configuration to the previous backup
     ///
     /// # Arguments
-    /// * `network` - Network configuration to rollback
+    /// * `network_name` - Name of the network interface to rollback
     ///
     /// # Returns
     /// Result indicating success or failure
-    pub fn rollback_network_config(network: &NetworkConfig) -> Result<()> {
-        let config_file = network_config_file!(network.name);
-        let backup_file = network_backup_file!(network.name);
+    fn rollback_network_config(network_name: &String) -> Result<()> {
+        let config_file = network_config_file!(network_name);
+        let backup_file = network_backup_file!(network_name);
 
         Self::rename_if_exists(&backup_file, &config_file)?;
         Ok(())
@@ -257,79 +269,86 @@ impl NetworkConfigService {
     where
         T: DeviceServiceClient,
     {
-        Self::backup_current_network_config(service_client, network).await?;
+        info!("apply network config");
+
+        Self::backup_current_network_config(service_client, &network.name).await?;
         Self::write_network_config(network)?;
         service_client.reload_network().await?;
 
         if network.is_server_addr && network.ip_changed {
-            Self::schedule_server_restart(network).await?;
+            Self::create_rollback(network)?;
+            Self::trigger_server_restart()?;
         }
 
         Ok(())
     }
 
+    /// Backup the current network configuration file
+    ///
+    /// # Arguments
+    /// * `service_client` - Device service client for retrieving network interfaces
+    /// * `network_name` - Name of the network interface to backup
+    ///
+    /// # Returns
+    /// Result indicating success or failure
     async fn backup_current_network_config<T>(
         service_client: &T,
-        network: &NetworkConfig,
+        network_name: &String,
     ) -> Result<()>
     where
         T: DeviceServiceClient,
     {
-        let config_file = network_config_file!(&network.name);
-        let backup_file = network_backup_file!(&network.name);
+        info!("backup {network_name}");
 
+        let config_file = network_config_file!(&network_name);
+        let backup_file = network_backup_file!(&network_name);
+
+        // copy file
+        // if it doesn't exist try to find by network interfaces provided by omnect-device-service
         if !Self::copy_if_exists(&config_file, &backup_file)? {
+            info!("current config file not found ({network_name})");
+            info!("will try to find file in network interfaces provided by omnect-device-service");
+
             let status = service_client
                 .status()
                 .await
-                .context("failed to get status")?;
+                .context("failed to get device status")?;
 
-            let current_network = status
+            debug!(
+                "network interfaces: {:?}",
+                status.network_status.network_interfaces
+            );
+
+            // find network file
+            let file_name = status
                 .network_status
                 .network_interfaces
                 .iter()
-                .find(|iface| iface.name == network.name)
-                .context("failed to find current network interface")?;
-
-            log::debug!("current network is {current_network:?}");
-
-            let file_name = Path::new(&current_network.file)
+                .find(|iface| iface.name == *network_name)
+                .context("failed to find network interface")?
+                .file
                 .file_name()
-                .context("context")?;
+                .context("failed to get network file name")?;
 
+            // map to internal mount
             let config_file = network_path!(file_name);
             log::debug!("config file is {config_file:?}");
 
-            Self::copy_if_exists(&config_file, &backup_file)?;
+            if !Self::copy_if_exists(&config_file, &backup_file)? {
+                error!("failed to copy {config_file:?} to {backup_file:?}")
+            }
         }
 
         Ok(())
     }
 
-    async fn rollback_and_restart<T>(service_client: &T, network: &NetworkConfig) -> Result<()>
-    where
-        T: DeviceServiceClient,
-    {
-        Self::rollback_network_config(network)?;
-        service_client.reload_network().await?;
-        Self::trigger_server_restart()?;
-
-        Ok(())
-    }
-
-    async fn execute_rollback<T>(service_client: &T, network: &NetworkConfig, label: &str)
-    where
-        T: DeviceServiceClient,
-    {
-        info!("executing {} network rollback", label);
-
-        if let Err(e) = Self::rollback_and_restart(service_client, network).await {
-            error!("failed to execute {label} rollback: {e:#}");
-        } else {
-            info!("{} network rollback executed successfully", label);
-        }
-    }
-
+    /// Write network configuration to systemd-networkd file
+    ///
+    /// # Arguments
+    /// * `network` - Network configuration to write
+    ///
+    /// # Returns
+    /// Result indicating success or failure
     fn write_network_config(network: &NetworkConfig) -> Result<()> {
         let mut ini = Ini::new();
 
@@ -341,10 +360,10 @@ impl NetworkConfigService {
         if network.dhcp {
             network_section.set("DHCP", "yes");
         } else {
-            network_section.set(
-                "Address",
-                format!("{}/{}", network.ip.unwrap(), network.netmask.unwrap()),
-            );
+            let ip = network.ip.context("network ip missing")?;
+            let mask = network.netmask.context("network mask missing")?;
+
+            network_section.set("Address", format!("{ip}/{mask}"));
 
             if let Some(gateways) = &network.gateway {
                 for gateway in gateways {
@@ -360,27 +379,41 @@ impl NetworkConfigService {
         }
 
         let config_path = network_config_file!(&network.name);
-        ini.write_to_file(&config_path).context(format!(
-            "failed to write network config file {config_path:?}"
-        ))?;
+
+        info!("write network config to {config_path:?}: {ini:?}");
+
+        ini.write_to_file(&config_path)
+            .context(format!("failed to write network config: {config_path:?}"))?;
 
         Ok(())
     }
 
-    async fn schedule_server_restart(network: &NetworkConfig) -> Result<()> {
-        let rollback_time = SystemTime::now() + Duration::from_secs(ROLLBACK_TIMEOUT_SECS);
-
-        let pending_rollback = PendingRollback {
+    /// Create a rollback entry for network configuration changes
+    ///
+    /// # Arguments
+    /// * `network` - Network configuration to create rollback for
+    ///
+    /// # Returns
+    /// Result indicating success or failure
+    fn create_rollback(network: &NetworkConfig) -> Result<()> {
+        let rollback = Rollback {
             network_config: network.clone(),
-            rollback_time,
+            deadline: SystemTime::now() + Duration::from_secs(ROLLBACK_TIMEOUT_SECS),
         };
 
-        if let Err(e) = save_rollback!(&pending_rollback) {
-            error!("failed to save pending rollback: {e:#}");
-        }
+        info!("create rollback: {rollback:?}");
 
-        Self::trigger_server_restart()?;
+        let path = network_rollback_file!();
 
-        Ok(())
+        serde_json::to_writer_pretty(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(path)
+                .context(format!("failed to open rollback file for write: {path:?}"))?,
+            &rollback,
+        )
+        .context(format!("failed to serialize rollback: {path:?}"))
     }
 }
