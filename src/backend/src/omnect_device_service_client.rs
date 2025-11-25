@@ -3,7 +3,6 @@
 use crate::{
     config::AppConfig,
     http_client::{handle_http_response, unix_socket_client},
-    services::certificate::CreateCertPayload,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use log::info;

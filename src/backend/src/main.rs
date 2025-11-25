@@ -223,7 +223,7 @@ async fn run_server(
     let ui_port = config.ui.port;
     let session_key = Key::generate();
     let token_manager = TokenManager::new(&config.centrifugo.client_token);
-    let static_path = std::fs::canonicalize("static").context("failed to find static folder")?;
+    let static_path = std::fs::canonicalize("dist").context("failed to find dist folder")?;
 
     let server = HttpServer::new(move || {
         App::new()

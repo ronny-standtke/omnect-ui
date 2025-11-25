@@ -4,13 +4,13 @@ ARG DISTROLESS_IMAGE=gcr.io/distroless/base-debian12:nonroot
 
 FROM oven/bun AS vue-install
 RUN mkdir -p /tmp
-COPY vue/package.json /tmp
-COPY vue/bun.lock /tmp
+COPY src/ui/package.json /tmp
+COPY src/ui/bun.lock /tmp
 RUN cd /tmp && bun install --frozen-lockfile
 
 FROM oven/bun AS vue-build
 WORKDIR /usr/src/app
-COPY vue .
+COPY src/ui .
 COPY --from=vue-install /tmp/node_modules node_modules
 RUN bun run build
 
@@ -34,22 +34,18 @@ RUN curl -sSLf https://centrifugal.dev/install.sh | sh
 
 COPY --from=distroless /var/lib/dpkg/status.d /distroless_pkgs
 
-RUN cargo new /work/omnect-ui
+COPY Cargo.lock ./Cargo.lock
+COPY Cargo.toml ./Cargo.toml
+COPY src ./src
 
-COPY Cargo.lock ./omnect-ui/Cargo.lock
-COPY Cargo.toml ./omnect-ui/Cargo.toml
-COPY src/build.rs ./omnect-ui/src/build.rs
+RUN --mount=type=cache,target=/usr/local/cargo/registry cargo build ${OMNECT_UI_BUILD_ARG} --release -p omnect-ui --target-dir ./build
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry cd omnect-ui && cargo build ${OMNECT_UI_BUILD_ARG} --release --target-dir ./build
-
-COPY src ./omnect-ui/src/
-COPY .git ./omnect-ui/.git
+COPY .git ./.git
 RUN --mount=type=cache,target=/usr/local/cargo/registry <<EOF
   set -e
   # update timestamps to force a new build
-  touch /work/omnect-ui/src/main.rs
-  cd omnect-ui/
-  cargo build ${OMNECT_UI_BUILD_ARG} --release --target-dir ./build
+  touch /work/src/backend/src/main.rs
+  cargo build ${OMNECT_UI_BUILD_ARG} --release -p omnect-ui --target-dir ./build
 EOF
 
 SHELL ["/bin/bash", "-c"]
@@ -58,7 +54,7 @@ RUN <<EOT
 
     mkdir -p /copy/status.d
 
-    executable=(omnect-ui/build/release/omnect-ui)
+    executable=(build/release/omnect-ui)
 
     mkdir -p /copy/$(dirname "${executable}")
     cp "${executable}" /copy/"${executable}"
@@ -99,13 +95,13 @@ RUN mkdir /cert
 
 FROM ${DISTROLESS_IMAGE} AS base
 COPY --from=builder --chown=10000:10000 /cert /cert
-COPY --from=builder /work/omnect-ui/build/release/omnect-ui /
+COPY --from=builder /work/build/release/omnect-ui /
 COPY --from=builder /work/centrifugo /
 COPY --from=builder /copy/lib/ /lib/
 COPY --from=builder /copy/status.d /var/lib/dpkg/status.d
-COPY --from=vue-build /usr/src/app/dist /static/
+COPY --from=vue-build /usr/src/app/dist /dist/
 
 WORKDIR "/"
-COPY config/centrifugo_config.json /
+COPY src/backend/config/centrifugo_config.json /
 
 ENTRYPOINT [ "/omnect-ui" ]

@@ -5,5 +5,5 @@ centrifugo
 *.tar.gz
 *.env
 *.http
-/static
+/dist
 CLAUDE.md

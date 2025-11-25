@@ -1,7 +1,7 @@
 # file used for local development
 
 # local arm64 build
-omnect_ui_version=$(toml get --raw Cargo.toml package.version)
+omnect_ui_version=$(toml get --raw Cargo.toml workspace.package.version)
 
 docker buildx build \
   --platform linux/arm64 \
