@@ -36,13 +36,16 @@ impl FirmwareService {
             .context("failed to persist temporary file")?;
 
         // 2. copy to local container filesystem
-        fs::copy(tmp_update_file, local_update_file).context("failed to copy firmware to data dir")?;
+        fs::copy(tmp_update_file, local_update_file)
+            .context("failed to copy firmware to data dir")?;
 
         // 3. allow host to access the file
-        let metadata = fs::metadata(local_update_file).context("failed to get firmware metadata")?;
+        let metadata =
+            fs::metadata(local_update_file).context("failed to get firmware metadata")?;
         let mut perm = metadata.permissions();
         perm.set_mode(0o750);
-        fs::set_permissions(local_update_file, perm).context("failed to set firmware permissions")?;
+        fs::set_permissions(local_update_file, perm)
+            .context("failed to set firmware permissions")?;
 
         Ok(())
     }

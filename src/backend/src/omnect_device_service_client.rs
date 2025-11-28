@@ -295,12 +295,6 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
     }
 
     async fn reload_network(&self) -> Result<()> {
-        use tokio::time::sleep;
-        self.post(Self::RELOAD_NETWORK_ENDPOINT).await?;
-
-        // this is a hack since ods reports same networks after reload
-        // so sleeping for a while and do it again fixes the issue
-        sleep(std::time::Duration::from_secs(5)).await;
         self.post(Self::RELOAD_NETWORK_ENDPOINT).await?;
         Ok(())
     }
@@ -336,8 +330,9 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
 
     async fn shutdown(&self) -> Result<()> {
         if self.has_publish_endpoint {
-            let path = format!("{}/{}", Self::PUBLISH_ENDPOINT, env!("CARGO_PKG_NAME"));
-            let url = self.build_url(&path);
+            let endpoint = Self::PUBLISH_ENDPOINT;
+            let pkg_name = env!("CARGO_PKG_NAME");
+            let url = self.build_url(&format!("{endpoint}/{pkg_name}"));
             info!("DELETE {url}");
 
             self.client

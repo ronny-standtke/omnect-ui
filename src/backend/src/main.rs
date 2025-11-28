@@ -18,7 +18,6 @@ use crate::{
     },
 };
 use actix_cors::Cors;
-use actix_files::Files;
 use actix_multipart::form::MultipartFormConfig;
 use actix_server::ServerHandle;
 use actix_session::{
@@ -31,6 +30,7 @@ use actix_web::{
     cookie::{Key, SameSite},
     web::{self, Data},
 };
+use actix_web_static_files::ResourceFiles;
 use anyhow::{Context, Result};
 use env_logger::{Builder, Env, Target};
 use log::{debug, error, info, warn};
@@ -44,6 +44,15 @@ use tokio::{
 
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
+
+// Include the generated static files from build.rs
+include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+
+// Alias the generated function to a more descriptive name
+#[inline(always)]
+fn static_files() -> std::collections::HashMap<&'static str, static_files::Resource> {
+    generate()
+}
 
 type UiApi = Api<OmnectDeviceServiceClient, KeycloakProvider>;
 
@@ -136,16 +145,14 @@ async fn run_until_shutdown(
     info!("starting server");
 
     // 1. create the cert with the ip in CommonName
-    let ip_address = service_client
+    let common_name = service_client
         .ip_address()
         .await
         .context("failed to get IP address")?;
 
-    CertificateService::create_module_certificate(CreateCertPayload {
-        common_name: ip_address,
-    })
-    .await
-    .context("failed to create certificate")?;
+    CertificateService::create_module_certificate(CreateCertPayload { common_name })
+        .await
+        .context("failed to create certificate")?;
 
     // 2. run centrifugo with valid cert
     let mut centrifugo = run_centrifugo().context("failed to start centrifugo")?;
@@ -223,7 +230,6 @@ async fn run_server(
     let ui_port = config.ui.port;
     let session_key = Key::generate();
     let token_manager = TokenManager::new(&config.centrifugo.client_token);
-    let static_path = std::fs::canonicalize("dist").context("failed to find dist folder")?;
 
     let server = HttpServer::new(move || {
         App::new()
@@ -252,6 +258,7 @@ async fn run_server(
             )
             .app_data(Data::new(token_manager.clone()))
             .app_data(Data::new(api.clone()))
+            .app_data(Data::new(static_files()))
             .route("/", web::get().to(UiApi::index))
             .route("/config.js", web::get().to(UiApi::config))
             .route(
@@ -306,7 +313,7 @@ async fn run_server(
             .route("/logout", web::post().to(UiApi::logout))
             .route("/healthcheck", web::get().to(UiApi::healthcheck))
             .route("/network", web::post().to(UiApi::set_network_config))
-            .service(Files::new("/static", static_path.clone()))
+            .service(ResourceFiles::new("/static", static_files()))
             .default_service(web::route().to(UiApi::index))
     })
     .bind_rustls_0_23(format!("0.0.0.0:{ui_port}"), tls_config)
@@ -320,10 +327,8 @@ async fn run_server(
 fn run_centrifugo() -> Result<Child> {
     let config = &AppConfig::get().centrifugo;
     let certificate = &AppConfig::get().certificate;
-    let centrifugo_path =
-        std::fs::canonicalize("centrifugo").context("failed to find centrifugo binary")?;
 
-    let centrifugo = Command::new(centrifugo_path)
+    let centrifugo = Command::new(&config.binary_path)
         .arg("-c")
         .arg("/centrifugo_config.json")
         .envs(vec![

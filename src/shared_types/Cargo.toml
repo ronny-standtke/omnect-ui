@@ -1,0 +1,17 @@
+[package]
+name = "shared_types"
+description = "TypeGen for omnect-ui-core types"
+readme = "../../README.md"
+edition = "2021"
+
+authors.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[build-dependencies]
+anyhow = "1.0"
+crux_core = { version = "0.16", features = ["typegen"] }
+crux_http = { version = "0.15", features = ["typegen"] }
+omnect-ui-core = { path = "../app", features = ["typegen"] }

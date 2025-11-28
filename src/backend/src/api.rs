@@ -16,6 +16,9 @@ use actix_web::{HttpResponse, Responder, web};
 use anyhow::Result;
 use log::{debug, error};
 use serde::Deserialize;
+use std::collections::HashMap;
+
+pub type StaticResources = HashMap<&'static str, static_files::Resource>;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,7 +60,10 @@ where
         })
     }
 
-    pub async fn index(api: web::Data<Self>) -> actix_web::Result<NamedFile> {
+    pub async fn index(
+        api: web::Data<Self>,
+        static_resources: web::Data<StaticResources>,
+    ) -> actix_web::Result<HttpResponse> {
         debug!("index() called");
 
         api.service_client.republish().await.map_err(|e| {
@@ -65,7 +71,15 @@ where
             actix_web::error::ErrorInternalServerError("republish failed")
         })?;
 
-        Ok(NamedFile::open(&AppConfig::get().paths.index_html)?)
+        let Some(index_html) = static_resources.get("index.html") else {
+            return Err(actix_web::error::ErrorNotFound(
+                "index.html not found in embedded resources",
+            ));
+        };
+
+        Ok(HttpResponse::Ok()
+            .content_type(index_html.mime_type)
+            .body(index_html.data.to_vec()))
     }
 
     pub async fn config() -> actix_web::Result<NamedFile> {

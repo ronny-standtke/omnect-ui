@@ -16,17 +16,21 @@ actix-cors = { version = "0.7", default-features = false }
 actix-files = { version = "0.6", default-features = false }
 actix-multipart = { version = "0.7", default-features = false, features = [
   "tempfile",
-  "derive"
+  "derive",
 ] }
 actix-server = { version = "2.6", default-features = false }
 actix-session = { version = "0.11", features = ["cookie-session"] }
+actix-web-static-files = { version = "4.1", features = ["static-files-03"] }
 actix-web = { version = "4.11", default-features = false, features = [
   "macros",
   "rustls-0_23",
 ] }
 actix-web-httpauth = { version = "0.8", default-features = false }
 anyhow = { version = "1.0", default-features = false }
-argon2 = { version = "0.5", default-features = false, features = ["password-hash", "alloc"] }
+argon2 = { version = "0.5", default-features = false, features = [
+  "password-hash",
+  "alloc",
+] }
 base64 = { version = "0.22", default-features = false }
 env_logger = { version = "0.11", default-features = false }
 jwt-simple = { version = "0.12", default-features = false, features = [
@@ -38,7 +42,10 @@ log-panics = { version = "2.1", default-features = false, features = [
 ] }
 mockall = { version = "0.13", optional = true, default-features = false }
 rand_core = { version = "0.9", default-features = false, features = ["std"] }
-reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12.23", default-features = false, features = [
+  "json",
+  "rustls-tls",
+] }
 rust-ini = { version = "0.21", default-features = false }
 rustls = { version = "0.23", default-features = false, features = [
   "aws_lc_rs",
@@ -55,15 +62,14 @@ serde_json = { version = "1.0", default-features = false, features = [
 ] }
 serde_repr = { version = "0.1", default-features = false }
 serde_valid = { version = "2.0", default-features = false }
+static-files = { version = "0.3", default-features = false }
 tokio = { version = "1.45", default-features = false, features = [
   "macros",
   "net",
   "process",
 ] }
 trait-variant = { version = "0.1", default-features = false }
-uuid = { version = "1.17", default-features = false, features = [
-  "v4",
-] }
+uuid = { version = "1.17", default-features = false, features = ["v4"] }
 
 [features]
 mock = ["dep:mockall"]
@@ -73,3 +79,11 @@ actix-http = "3.11"
 actix-service = "2.0"
 mockall_double = "0.3"
 tempfile = "3.20"
+
+
+[[bin]]
+name = "setup-password"
+path = "src/bin/setup_password.rs"
+
+[build-dependencies]
+static-files = { version = "0.3", default-features = false }

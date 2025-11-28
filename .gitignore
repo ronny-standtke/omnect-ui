@@ -1,9 +1,16 @@
 /target
 /temp
-.vscode
-centrifugo
+.vscode/settings.json
+tools/centrifugo
 *.tar.gz
 *.env
 *.http
 /dist
 CLAUDE.md
+
+# Generated WASM package (rebuild with wasm-pack)
+src/ui/src/core/pkg/
+
+# Research and documentation files (generated, not part of source)
+*.md
+!README.md

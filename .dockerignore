@@ -1,4 +1,5 @@
 src/ui/node_modules
 src/ui/dist
 src/ui/.vscode
+src/shared_types/generated/typescript/node_modules
 target

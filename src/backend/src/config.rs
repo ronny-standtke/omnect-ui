@@ -43,6 +43,7 @@ pub struct CentrifugoConfig {
     pub api_key: String,
     pub publish_endpoint: crate::omnect_device_service_client::PublishEndpoint,
     pub log_level: String,
+    pub binary_path: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -74,7 +75,6 @@ pub struct IoTEdgeConfig {
 pub struct PathConfig {
     pub app_config_path: PathBuf,
     pub data_dir: PathBuf,
-    pub index_html: PathBuf,
     pub password_file: PathBuf,
     pub host_update_file: PathBuf,
     pub local_update_file: PathBuf,
@@ -154,7 +154,7 @@ impl CentrifugoConfig {
         let api_key = Uuid::new_v4().to_string();
 
         let publish_endpoint = crate::omnect_device_service_client::PublishEndpoint {
-            url: format!("https://localhost:{}/api/publish", port),
+            url: format!("https://localhost:{port}/api/publish"),
             headers: vec![
                 crate::omnect_device_service_client::HeaderKeyValue {
                     name: String::from("Content-Type"),
@@ -167,12 +167,20 @@ impl CentrifugoConfig {
             ],
         };
 
+        // In test/mock mode, use a dummy path since the binary is not actually executed
+        #[cfg(any(test, feature = "mock"))]
+        let binary_path = PathBuf::from("centrifugo_path");
+        #[cfg(not(any(test, feature = "mock")))]
+        let binary_path =
+            std::fs::canonicalize("centrifugo").context("failed to find centrifugo binary")?;
+
         Ok(Self {
             port,
             client_token,
             api_key,
             publish_endpoint,
             log_level,
+            binary_path,
         })
     }
 }
@@ -265,15 +273,6 @@ impl PathConfig {
 
         let app_config_path = config_dir.join("app_config.js");
         let host_data_dir = PathBuf::from(format!("/var/lib/{}/", env!("CARGO_PKG_NAME")));
-
-        // In test/mock mode, use a dummy path since dist/index.html won't exist
-        #[cfg(any(test, feature = "mock"))]
-        let index_html = PathBuf::from("/dev/null");
-
-        #[cfg(not(any(test, feature = "mock")))]
-        let index_html = std::fs::canonicalize("dist/index.html")
-            .context("failed to find dist/index.html")?;
-
         let password_file = config_dir.join("password");
         let host_update_file = host_data_dir.join("update.tar");
         let local_update_file = data_dir.join("update.tar");
@@ -282,7 +281,6 @@ impl PathConfig {
         Ok(Self {
             app_config_path,
             data_dir,
-            index_html,
             password_file,
             host_update_file,
             local_update_file,

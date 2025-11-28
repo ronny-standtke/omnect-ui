@@ -2,6 +2,14 @@
 resolver = "2"
 members = [
     "src/backend",
+    "src/app",
+    "src/shared_types",
+]
+# shared_types is excluded from default-members because it's only needed for TypeGen
+# and conflicts with the dual lib/cdylib compilation of omnect-ui-core
+default-members = [
+    "src/backend",
+    "src/app",
 ]
 
 [workspace.package]

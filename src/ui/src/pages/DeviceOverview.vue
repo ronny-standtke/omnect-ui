@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import DeviceActions from "../components/DeviceActions.vue"
-import DeviceInfo from "../components/DeviceInfo.vue"
+import DeviceInfo from "../components/DeviceInfoCore.vue"
 import { useOverlaySpinner } from "../composables/useOverlaySpinner"
 import { useWaitReconnect } from "../composables/useWaitReconnect"
 

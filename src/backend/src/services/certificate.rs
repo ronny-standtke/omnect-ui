@@ -84,7 +84,8 @@ impl CertificateService {
         let response: CreateCertResponse =
             serde_json::from_str(&body).context("failed to parse certificate response")?;
         let paths = &AppConfig::get().certificate;
-        let mut cert_file = File::create(&paths.cert_path).context("failed to create certificate file")?;
+        let mut cert_file =
+            File::create(&paths.cert_path).context("failed to create certificate file")?;
         let mut key_file = File::create(&paths.key_path).context("failed to create key file")?;
 
         cert_file
