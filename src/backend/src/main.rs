@@ -272,12 +272,6 @@ async fn run_server(
                 web::post().to(UiApi::reboot).wrap(middleware::AuthMw),
             )
             .route(
-                "/reload-network",
-                web::post()
-                    .to(UiApi::reload_network)
-                    .wrap(middleware::AuthMw),
-            )
-            .route(
                 "/update/file",
                 web::post()
                     .to(UiApi::upload_firmware_file)
@@ -313,6 +307,7 @@ async fn run_server(
             .route("/logout", web::post().to(UiApi::logout))
             .route("/healthcheck", web::get().to(UiApi::healthcheck))
             .route("/network", web::post().to(UiApi::set_network_config))
+            .route("/ack-rollback", web::post().to(UiApi::ack_rollback))
             .service(ResourceFiles::new("/static", static_files()))
             .default_service(web::route().to(UiApi::index))
     })
@@ -330,7 +325,7 @@ fn run_centrifugo() -> Result<Child> {
 
     let centrifugo = Command::new(&config.binary_path)
         .arg("-c")
-        .arg("/centrifugo_config.json")
+        .arg(&config.config_path)
         .envs(vec![
             (
                 "CENTRIFUGO_HTTP_SERVER_TLS_CERT_PEM",

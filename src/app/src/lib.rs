@@ -1,5 +1,6 @@
 pub mod capabilities;
 pub mod events;
+pub mod http_helpers;
 pub mod macros;
 pub mod model;
 pub mod types;
@@ -20,11 +21,14 @@ use crux_http::Http;
 // Re-export core types
 pub use crate::capabilities::centrifugo::{CentrifugoOperation, CentrifugoOutput};
 pub use crate::events::Event;
+pub use crate::http_helpers::{
+    build_url, check_response_status, extract_error_message, extract_string_response,
+    handle_auth_error, handle_request_error, is_response_success, parse_json_response,
+    process_json_response, process_status_response, BASE_URL,
+};
 pub use crate::model::Model;
 pub use crate::types::*;
 pub use crux_http::Result as HttpResult;
-
-pub const API_BASE_URL: &str = "http://localhost:8000";
 
 /// Capabilities - side effects the app can perform
 ///

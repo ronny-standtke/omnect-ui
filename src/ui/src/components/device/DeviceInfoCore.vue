@@ -8,16 +8,13 @@
  * - Components read from the reactive viewModel
  * - No local refs for data - all computed from Core state
  */
-import { computed, onMounted } from 'vue'
-import { useCore } from '../composables/useCore'
+import { computed } from 'vue'
+import { useCore } from '../../composables/useCore'
+import { useCoreInitialization } from '../../composables/useCoreInitialization'
 
-const { viewModel, initialize, subscribeToChannels } = useCore()
+const { viewModel } = useCore()
 
-// Initialize Core and subscribe to Centrifugo channels
-onMounted(async () => {
-  await initialize()
-  subscribeToChannels()
-})
+useCoreInitialization()
 
 // All device info computed from the Core's viewModel
 const deviceInfo = computed(
@@ -43,7 +40,7 @@ const deviceInfo = computed(
 )
 
 // Factory reset status from Core
-const factoryResetStatus = computed(() => viewModel.factory_reset?.result.status ?? 'unknown')
+const factoryResetStatus = computed(() => viewModel.factory_reset?.result?.status ?? 'unknown')
 const factoryResetResult = computed(() => viewModel.factory_reset?.result ?? null)
 
 // Map Core status strings to display values

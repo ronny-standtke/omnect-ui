@@ -57,6 +57,20 @@ impl ServiceResultResponse for String {
     }
 }
 
+impl ServiceResultResponse for crate::services::network::SetNetworkConfigResponse {
+    fn into_response(self) -> HttpResponse {
+        match serde_json::to_string(&self) {
+            Ok(json) => HttpResponse::Ok()
+                .content_type("application/json")
+                .body(json),
+            Err(e) => {
+                error!("failed to serialize SetNetworkConfigResponse: {e:#}");
+                HttpResponse::InternalServerError().body("failed to serialize response")
+            }
+        }
+    }
+}
+
 /// Handle Result and extracting convert data to Response
 ///
 /// This is a common utility for processing Results and transform to HTTP responses.

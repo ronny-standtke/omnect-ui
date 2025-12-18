@@ -16,11 +16,23 @@ The Crux Core follows the Model-View-Update pattern:
 - `src/lib.rs` - App struct, Capabilities, and re-exports
 - `src/model.rs` - Model and ViewModel structs
 - `src/events.rs` - Event enum definitions
-- `src/types.rs` - Shared data types
+- `src/types/` - Domain-based type definitions
+  - `auth.rs` - Authentication types (AuthToken, password requests)
+  - `device.rs` - Device information types (SystemInfo, HealthcheckInfo)
+  - `network.rs` - Network configuration types and state
+  - `factory_reset.rs` - Factory reset types
+  - `update.rs` - Update validation types
+  - `common.rs` - Common shared types
+- `src/http_helpers.rs` - HTTP response handling helper functions
+- `src/macros.rs` - HTTP request macros (`auth_post!`, `unauth_post!`, `auth_post_basic!`, `http_get!`, `http_get_silent!`, `handle_response!`)
 - `src/update/` - Domain-based event handlers
-  - `mod.rs` - Main dispatcher and view function
+  - `mod.rs` - Main dispatcher
   - `auth.rs` - Authentication handlers (login, logout, password)
-  - `device.rs` - Device action handlers (reboot, factory reset, network, updates)
+  - `device/` - Device action handlers
+    - `mod.rs` - Device event dispatcher
+    - `operations.rs` - Device operations (reboot, factory reset, updates)
+    - `network.rs` - Network configuration handlers
+    - `reconnection.rs` - Device reconnection handlers
   - `websocket.rs` - WebSocket/Centrifugo handlers
   - `ui.rs` - UI action handlers (clear error/success)
 - `src/capabilities/centrifugo.rs` - Custom WebSocket capability (deprecated API, kept for Effect enum generation)
@@ -115,42 +127,8 @@ cargo clippy -p omnect-ui-core -- -D warnings
 
 ## Current Status
 
-### Completed Infrastructure
-
-- [x] Complete WASM integration with wasm-pack
-- [x] Implement full effect processing in Vue shell
-- [x] Migrate all state management from Vue stores to Crux Core
-- [x] Migrate Centrifugo capability to Command API (non-deprecated)
-- [x] Migrate HTTP capability to Command API (non-deprecated)
-- [x] Split monolithic lib.rs into domain-based modules
-- [x] Suppress deprecated warnings with module-level `#![allow(deprecated)]`
-- [x] Introduce shared_types crate for types shared between backend API and Crux Core
-- [x] Create proof-of-concept component (DeviceInfoCore.vue)
-
-### Vue Component Migration (Future PRs)
-
-The Core infrastructure is complete, but most Vue components still use direct API calls (`useFetch`, `useCentrifuge`). These need to be migrated to use the Core:
-
-**Components to Migrate:**
-
-1. [ ] `DeviceActions.vue` - Reboot and factory reset actions
-   - Replace `useFetch` POST calls with Core events
-   - Replace `useCentrifuge` factory reset subscription with Core ViewModel
-2. [x] `DeviceInfo.vue` - Replaced with `DeviceInfoCore.vue`
-   - ~~Update import in `DeviceOverview.vue`~~
-   - ~~Remove old `DeviceInfo.vue` file~~
-3. [ ] `DeviceNetworks.vue` - Network list and status
-   - Replace `useCentrifuge` subscription with Core ViewModel
-4. [ ] `NetworkSettings.vue` - Network configuration
-   - Replace `useFetch` POST calls with Core events
-5. [ ] `UpdateFileUpload.vue` - Firmware update upload
-   - Replace `useFetch` multipart upload with Core event
-6. [ ] `UserMenu.vue` - User authentication actions
-   - Replace `useFetch` logout with Core event
-
 **Additional Tasks:**
 
-- [ ] Remove `useCentrifuge` composable once all components migrated
 - [ ] Add comprehensive integration tests for all migrated components
 - [ ] Add more unit tests for Core edge cases
 - [ ] Performance testing and bundle size optimization
@@ -158,3 +136,5 @@ The Core infrastructure is complete, but most Vue components still use direct AP
 ### Technical Debt
 
 - [ ] Remove deprecated capabilities once crux_core provides alternative Effect generation mechanism
+- [ ] Refactor `Model.auth_token` to not be serialized to the view model directly. The current approach of removing `#[serde(skip_serializing)]` in `src/app/src/model.rs` is a workaround for `shared_types` deserialization misalignment. A long-term solution should involve either making TypeGen respect `skip_serializing` or separating view-specific model fields.
+- [ ] Address `crux_http` error handling for non-2xx HTTP responses: The current implementation uses a workaround (`x-original-status` header in `useCore.ts` and corresponding logic in macros) because `crux_http` (v0.15) appears to discard response bodies for 4xx/5xx status codes, preventing detailed error messages from reaching the Core. This workaround should be removed if future `crux_http` versions provide a more direct way to access error response bodies.

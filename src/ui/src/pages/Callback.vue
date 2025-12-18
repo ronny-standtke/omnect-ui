@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
 import { getUser, handleRedirectCallback } from "../auth/auth-service"
-import OmnectLogo from "../components/OmnectLogo.vue"
+import OmnectLogo from "../components/branding/OmnectLogo.vue"
 
 const router = useRouter()
 const loading = ref(false)

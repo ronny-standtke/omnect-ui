@@ -2,10 +2,14 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "run_dev_setup",
+            "label": "check_ods_and_centrifugo",
             "type": "shell",
-            "command": "${workspaceFolder}/scripts/dev-setup.sh",
-            "problemMatcher": []
+            "command": "${workspaceFolder}/.vscode/tasks.sh",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
         }
     ]
 }

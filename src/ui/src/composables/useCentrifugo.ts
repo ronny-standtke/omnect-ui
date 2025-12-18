@@ -3,19 +3,33 @@ import { type Ref, ref } from "vue"
 import type { CentrifugeSubscriptionType } from "../enums/centrifuge-subscription-type.enum"
 import { useEventHook } from "./useEventHook"
 
+// Global state for the token ref, passed from useCore to avoid circular dependency
+let globalAuthTokenRef: Ref<string | null> | undefined
+
 const centrifuge: Ref<Centrifuge | undefined> = ref(undefined)
 const connectedEvent = useEventHook()
+const isConnected = ref(false)
 
 export function useCentrifuge() {
 	const centrifuge_url = `wss://${window.location.hostname}:8000/connection/websocket`
-	const token = ref("")
+
+	// method to inject the auth token ref from useCore
+	const setAuthToken = (tokenRef: Ref<string | null>) => {
+		globalAuthTokenRef = tokenRef
+	}
 
 	const initializeCentrifuge = () => {
 		if (!centrifuge.value) {
+			if (!globalAuthTokenRef) {
+				console.error("Centrifugo initialization error: authTokenRef not set. Call setAuthToken first.")
+				return // Prevent crash
+			}
+			const token = globalAuthTokenRef?.value || undefined // Use undefined if empty to align with Centrifuge type
+
 			centrifuge.value = new Centrifuge(centrifuge_url, {
-				token: token.value,
+				token: token,
 				getToken: async () => {
-					return await getToken()
+					return await fetchAndRefreshCentrifugeToken()
 				}
 			})
 			centrifuge.value
@@ -23,10 +37,12 @@ export function useCentrifuge() {
 					console.debug(`connecting: ${ctx.code}, ${ctx.reason}`)
 				})
 				.on("connected", (ctx) => {
+					isConnected.value = true
 					connectedEvent.trigger()
 					console.debug(`connected over ${ctx.transport}`)
 				})
 				.on("disconnected", (ctx) => {
+					isConnected.value = false
 					console.debug(`disconnected: ${ctx.code}, ${ctx.reason}`)
 				})
 				.connect()
@@ -37,14 +53,39 @@ export function useCentrifuge() {
 		if (centrifuge.value) {
 			centrifuge.value.disconnect()
 			centrifuge.value = undefined
+			isConnected.value = false
 		}
 	}
 
-	const getToken = async (): Promise<string> => {
-		const res = await fetch("token/refresh")
+	const fetchAndRefreshCentrifugeToken = async (): Promise<string> => {
+		try {
+			// Architectural Note: Ideally, all network effects would originate from the Core.
+			// However, Centrifuge's `getToken` callback expects a direct, synchronous-like
+			// Promise resolution. To avoid complex async state management and event routing
+			// through the Core for every token refresh, the Shell directly performs this
+			// network request. It uses the `authToken` from useCore (which is populated
+			// by the Core's LoginResponse) as a Bearer token, which is a more robust
+			// mechanism in some development environments than relying solely on session cookies.
+			if (!globalAuthTokenRef) {
+				console.error("fetchAndRefreshCentrifugeToken error: authTokenRef not set.")
+				return ""
+			}
+			const token = globalAuthTokenRef.value
+			const headers: HeadersInit = token
+				? { Authorization: `Bearer ${token}` }
+				: {}
 
-		if (res.ok) {
-			return await res.text()
+			const res = await fetch("token/refresh", {
+				credentials: "include",
+				headers
+			});
+
+			if (res.ok) {
+				return await res.text()
+			}
+			console.error(`Failed to refresh token: ${res.status} ${res.statusText}`)
+		} catch (e) {
+			console.error("Error refreshing token:", e)
 		}
 
 		return ""
@@ -82,9 +123,14 @@ export function useCentrifuge() {
 		if (!centrifuge.value) {
 			return
 		}
-		const res = await centrifuge.value.history(channel, { limit: 1 })
-		if (res?.publications.length > 0) {
-			callback(res.publications[0].data as T)
+		try {
+			const res = await centrifuge.value.history(channel, { limit: 1 })
+			if (res && res.publications.length > 0) {
+				// Check if res is defined
+				callback(res.publications[0].data as T)
+			}
+		} catch (e) {
+			console.error(`[Centrifugo] History failed for ${channel}:`, e)
 		}
 	}
 
@@ -103,5 +149,5 @@ export function useCentrifuge() {
 		}
 	}
 
-	return { subscribe, unsubscribe, unsubscribeAll, initializeCentrifuge, token, history, disconnect, onConnected: connectedEvent.on }
+	return { subscribe, unsubscribe, unsubscribeAll, initializeCentrifuge, history, disconnect, onConnected: connectedEvent.on, isConnected, setAuthToken };
 }

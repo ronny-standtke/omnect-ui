@@ -1,43 +1,40 @@
 <script setup lang="ts">
 import axios from "axios"
-import { onMounted, type Ref, ref } from "vue"
+import { onMounted, type Ref, ref, computed, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useDisplay } from "vuetify"
 import BaseSideBar from "./components/BaseSideBar.vue"
 import DialogContent from "./components/DialogContent.vue"
-import OmnectLogo from "./components/OmnectLogo.vue"
-import OverlaySpinner from "./components/OverlaySpinner.vue"
+import OmnectLogo from "./components/branding/OmnectLogo.vue"
+import OverlaySpinner from "./components/feedback/OverlaySpinner.vue"
 import UserMenu from "./components/UserMenu.vue"
-import { useAwaitUpdate } from "./composables/useAwaitUpdate"
-import { useCentrifuge } from "./composables/useCentrifugo"
-import { useOverlaySpinner } from "./composables/useOverlaySpinner"
+import { useCore } from "./composables/useCore"
 import { useSnackbar } from "./composables/useSnackbar"
-import { useWaitReconnect } from "./composables/useWaitReconnect"
 import type { HealthcheckResponse } from "./types"
 
 axios.defaults.validateStatus = (_) => true
 
 const { snackbarState } = useSnackbar()
-const { overlaySpinnerState, reset } = useOverlaySpinner()
-const { initializeCentrifuge } = useCentrifuge()
-const { onConnected } = useWaitReconnect()
-const { onUpdateDone } = useAwaitUpdate()
+const { viewModel, ackRollback } = useCore()
+
 const { lgAndUp } = useDisplay()
 const router = useRouter()
 const route = useRoute()
 const showSideBar: Ref<boolean> = ref(lgAndUp.value)
 const overlay: Ref<boolean> = ref(false)
+const showRollbackNotification: Ref<boolean> = ref(false)
 const errorTitle = ref("")
 const errorMsg = ref("")
 
-onUpdateDone(() => {
-	reset()
-	router.push("/login")
-})
+const overlaySpinnerState = computed(() => viewModel.overlay_spinner)
 
-onConnected(() => {
-	reset()
-	router.push("/login")
+// Build redirect URL from network_change_state when waiting for new IP
+const redirectUrl = computed(() => {
+	const state = viewModel.network_change_state
+	if (state.type === 'waiting_for_new_ip' && 'new_ip' in state && 'ui_port' in state) {
+		return `https://${(state as any).new_ip}:${(state as any).ui_port}`
+	}
+	return undefined
 })
 
 const toggleSideBar = () => {
@@ -48,9 +45,23 @@ const updateSidebarVisibility = (visible: boolean) => {
 	showSideBar.value = visible
 }
 
-onMounted(async () => {
-	initializeCentrifuge()
+const acknowledgeRollback = () => {
+	ackRollback()
+	showRollbackNotification.value = false
+}
 
+// Watch authentication state to redirect to login if session is lost
+// This handles the case where the backend restarts (reboot/factory reset) and the session becomes invalid
+watch(
+	() => viewModel.is_authenticated,
+	async (isAuthenticated) => {
+		if (!isAuthenticated && route.meta.requiresAuth) {
+			await router.push("/login")
+		}
+	}
+)
+
+onMounted(async () => {
 	const res = await fetch("healthcheck", {
 		headers: {
 			"Cache-Control": "no-cache, no-store, must-revalidate",
@@ -59,6 +70,10 @@ onMounted(async () => {
 		}
 	})
 	const data = (await res.json()) as HealthcheckResponse
+	if (data.network_rollback_occurred) {
+		showRollbackNotification.value = true
+	}
+
 	if (!res.ok) {
 		overlay.value = true
 		errorTitle.value = "omnect-device-service version mismatch"
@@ -73,6 +88,18 @@ onMounted(async () => {
       <DialogContent :title="errorTitle" dialog-type="Error" :show-close="false">
         <div class="flex flex-col gap-2 mb-8">
           {{ errorMsg }}
+        </div>
+      </DialogContent>
+    </v-dialog>
+    <v-dialog v-model="showRollbackNotification" max-width="500" persistent>
+      <DialogContent title="Network Settings Rolled Back" dialog-type="Warning" :show-close="false">
+        <div class="flex flex-col gap-4 mb-4">
+          <p>
+            The network settings were rolled back to the previous configuration because the new settings could not be confirmed.
+          </p>
+          <div class="flex justify-end">
+            <v-btn color="primary" @click="acknowledgeRollback">OK</v-btn>
+          </div>
         </div>
       </DialogContent>
     </v-dialog>
@@ -99,7 +126,10 @@ onMounted(async () => {
         </template>
       </v-snackbar>
       <OverlaySpinner :overlay="overlaySpinnerState.overlay" :title="overlaySpinnerState.title"
-        :text="overlaySpinnerState.text" :timed-out="overlaySpinnerState.timedOut" />
+        :text="overlaySpinnerState.text || undefined" :timed-out="overlaySpinnerState.timed_out"
+        :progress="overlaySpinnerState.progress || undefined"
+        :countdown-seconds="overlaySpinnerState.countdown_seconds || undefined"
+        :redirect-url="redirectUrl" />
     </v-main>
   </v-app>
 </template>

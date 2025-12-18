@@ -1,4 +1,5 @@
 use super::*;
+use crate::events::{AuthEvent, UiEvent, WebSocketEvent};
 use crux_core::testing::AppTester;
 
 #[test]
@@ -7,9 +8,9 @@ fn test_login_sets_loading() {
     let mut model = Model::default();
 
     let _command = app.update(
-        Event::Login {
+        Event::Auth(AuthEvent::Login {
             password: "pass".to_string(),
-        },
+        }),
         &mut model,
     );
 
@@ -31,7 +32,10 @@ fn test_system_info_updated() {
         boot_time: Some("2024-01-01".to_string()),
     };
 
-    let _command = app.update(Event::SystemInfoUpdated(info.clone()), &mut model);
+    let _command = app.update(
+        Event::WebSocket(WebSocketEvent::SystemInfoUpdated(info.clone())),
+        &mut model,
+    );
 
     assert_eq!(model.system_info, Some(info));
 }
@@ -44,7 +48,7 @@ fn test_clear_error() {
         ..Default::default()
     };
 
-    let _command = app.update(Event::ClearError, &mut model);
+    let _command = app.update(Event::Ui(UiEvent::ClearError), &mut model);
 
     assert_eq!(model.error_message, None);
 }

@@ -11,10 +11,26 @@ use argon2::{
 use log::debug;
 use std::{fs::File, io::Write};
 
+#[cfg(any(test, feature = "mock"))]
+use std::sync::{LazyLock, Mutex, MutexGuard};
+
+#[cfg(any(test, feature = "mock"))]
+#[allow(dead_code)]
+static PASSWORD_FILE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
 /// Service for password management operations
 pub struct PasswordService;
 
 impl PasswordService {
+    /// Acquire a lock for password file operations (test-only)
+    ///
+    /// This ensures that tests modifying the password file don't interfere with each other
+    #[cfg(any(test, feature = "mock"))]
+    #[allow(dead_code)]
+    pub fn lock_for_test() -> MutexGuard<'static, ()> {
+        PASSWORD_FILE_LOCK.lock().unwrap()
+    }
+
     /// Validate a password against the stored hash
     ///
     /// # Arguments
@@ -23,6 +39,7 @@ impl PasswordService {
     /// # Returns
     /// Result indicating success or failure
     pub fn validate_password(password: &str) -> Result<()> {
+        debug!("validate_password() called");
         ensure!(!password.is_empty(), "failed to validate password: empty");
 
         let password_file = &AppConfig::get().paths.password_file;
@@ -70,10 +87,42 @@ impl PasswordService {
 
         let password_file = &AppConfig::get().paths.password_file;
         let hash = Self::hash_password(password)?;
-        let mut file = File::create(password_file).context("failed to create password file")?;
 
-        file.write_all(hash.as_bytes())
-            .context("failed to write password file")
+        // Atomic write pattern: write to temp file, sync, then rename
+        // Retry strategy to handle potential transient filesystem issues OR verification failure
+        let max_retries = 3;
+        let mut last_error = anyhow!("Unknown error");
+
+        for i in 0..max_retries {
+            let temp_file_path = password_file.with_extension("tmp");
+
+            let result = (|| -> Result<()> {
+                let mut file =
+                    File::create(&temp_file_path).context("failed to create temp password file")?;
+
+                file.write_all(hash.as_bytes())
+                    .context("failed to write password file")?;
+
+                file.sync_all().context("failed to sync password file")?;
+
+                std::fs::rename(&temp_file_path, password_file)
+                    .context("failed to replace password file")?;
+
+                // Verify that the password can be read back and validated
+                Self::validate_password(password).context("failed to verify stored password")
+            })();
+
+            match result {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    log::warn!("store_or_update_password attempt {} failed: {:#}", i + 1, e);
+                    last_error = e;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        }
+
+        Err(last_error).context("store_or_update_password failed after retries")
     }
 
     /// Check if a password has been set
@@ -102,6 +151,8 @@ mod tests {
 
     #[test]
     fn test_store_and_check_password() {
+        let _lock = PasswordService::lock_for_test();
+
         // This test relies on AppConfig which is initialized in test mode with temp directories
         // Clean up any existing password file first
         let password_file = &AppConfig::get().paths.password_file;

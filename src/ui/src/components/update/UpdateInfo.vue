@@ -1,16 +1,10 @@
 <script setup lang="ts">
-import { useFetch } from "@vueuse/core"
 import { ref, toRef } from "vue"
-import { useAwaitUpdate } from "../composables/useAwaitUpdate"
-import { useOverlaySpinner } from "../composables/useOverlaySpinner"
-import { useSnackbar } from "../composables/useSnackbar"
-import router from "../plugins/router"
-import type { UpdateManifest } from "../types/update-manifest"
-import KeyValuePair from "./ui-components/KeyValuePair.vue"
+import { useCore } from "../../composables/useCore"
+import type { UpdateManifest } from "../../types/update-manifest"
+import KeyValuePair from "../ui-components/KeyValuePair.vue"
 
-const { showError: snackbarShowError } = useSnackbar()
-const { overlaySpinnerState, reset: resetOverlay } = useOverlaySpinner()
-const { startWaitReconnect, stopWaitReconnect } = useAwaitUpdate()
+const { viewModel, runUpdate } = useCore()
 
 const props = defineProps<{
 	updateManifest: UpdateManifest | undefined
@@ -23,35 +17,8 @@ defineEmits<(event: "reloadUpdateInfo") => void>()
 const updateManifest = toRef(props, "updateManifest")
 const runUpdatePayload = ref<{ validate_iothub_connection: boolean }>({ validate_iothub_connection: false })
 
-const {
-	onFetchError: onRunUpdateError,
-	error: runUpdateError,
-	statusCode: runUpdateStatusCode,
-	execute: runUpdate,
-	response
-} = useFetch("update/run", { immediate: false }).post(runUpdatePayload)
-
-onRunUpdateError(async () => {
-	if (runUpdateStatusCode.value === 401) {
-		router.push("/login")
-	} else {
-		showError(`Running update failed: ${(await response.value?.text()) ?? runUpdateError.value}`)
-	}
-})
-
-const triggerUpdate = () => {
-	runUpdate(false)
-	overlaySpinnerState.title = "Installing update"
-	overlaySpinnerState.text = "Please have some patience, the update may take some time."
-	overlaySpinnerState.overlay = true
-	overlaySpinnerState.isUpdateRunning = true
-	startWaitReconnect()
-}
-
-const showError = (errorMsg: string) => {
-	resetOverlay()
-	snackbarShowError(errorMsg)
-	stopWaitReconnect()
+const triggerUpdate = async () => {
+	await runUpdate(runUpdatePayload.value.validate_iothub_connection)
 }
 
 const toggleEnforceConnect = (v: boolean | null) => {

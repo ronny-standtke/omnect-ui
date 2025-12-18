@@ -21,12 +21,15 @@ typegen = ["crux_core/typegen", "crux_http/typegen"]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("facet_typegen"))'] }
 
 [dependencies]
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+console_log = { version = "1.0", default-features = false }
 crux_core = { version = "0.16", default-features = false }
 crux_http = { version = "0.15", default-features = false }
+lazy_static = { version = "1.4", default-features = false }
+log = { version = "0.4", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false }
-lazy_static = { version = "1.4", default-features = false }
 
 [build-dependencies]
 crux_core = { version = "0.16", default-features = false, features = ["typegen"] }

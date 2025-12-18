@@ -32,65 +32,26 @@ macro_rules! update_field {
     }};
 }
 
-/// Macro for parsing JSON channel messages with error handling.
-/// Reduces repetitive JSON parsing in WebSocket message handlers.
-///
-/// # Example
-///
-/// ```ignore
-/// parse_channel_data! {
-///     channel, data, model,
-///     "SystemInfoV1" => system_info: SystemInfo,
-///     "NetworkStatusV1" => network_status: NetworkStatus,
-///     "OnlineStatusV1" => online_status: OnlineStatus,
-/// }
-/// ```
-#[macro_export]
-macro_rules! parse_channel_data {
-    ($channel:expr, $data:expr, $model:expr, $($channel_name:literal => $field:ident: $type:ty),+ $(,)?) => {
-        match $channel {
-            $(
-                $channel_name => {
-                    if let Ok(parsed) = serde_json::from_str::<$type>($data) {
-                        $model.$field = Some(parsed);
-                    }
-                }
-            )+
-            _ => {
-                // Unknown channel, ignore
-            }
-        }
-    };
-}
-
-/// Helper function for standardized HTTP error messages
-pub fn http_error(action: &str, status: impl std::fmt::Display) -> String {
-    format!("{action} failed: HTTP {status}")
-}
+// Re-export http_helpers functions for macro use
+pub use crate::http_helpers::{
+    build_url, check_response_status, extract_error_message, extract_string_response,
+    handle_auth_error, handle_request_error, is_response_success, parse_json_response,
+    process_json_response, process_status_response, BASE_URL,
+};
 
 /// Macro for unauthenticated POST requests with standard error handling.
-/// Used for login, password setup, and other pre-authentication endpoints.
-///
-/// # Patterns
-///
-/// Pattern 1: POST with JSON body expecting JSON response
-/// ```ignore
-/// unauth_post!(model, "/api/token/login", LoginResponse, "Login",
-///     body_json: &credentials,
-///     expect_json: AuthToken
-/// )
-/// ```
+/// Requires domain parameters for event wrapping.
 ///
 /// Pattern 2: POST with JSON body expecting status only
 /// ```ignore
-/// unauth_post!(model, "/api/token/set-password", SetPasswordResponse, "Set password",
+/// unauth_post!(Auth, AuthEvent, model, "/set-password", SetPasswordResponse, "Set password",
 ///     body_json: &request
 /// )
 /// ```
 ///
 /// Pattern 3: GET expecting JSON response
 /// ```ignore
-/// unauth_post!(model, "/api/token/requires-password-set", CheckRequiresPasswordSetResponse, "Check password",
+/// unauth_post!(Auth, AuthEvent, model, "/require-set-password", CheckRequiresPasswordSetResponse, "Check password",
 ///     method: get,
 ///     expect_json: bool
 /// )
@@ -98,70 +59,109 @@ pub fn http_error(action: &str, status: impl std::fmt::Display) -> String {
 #[macro_export]
 macro_rules! unauth_post {
     // Pattern 1: POST with JSON body expecting JSON response
-    ($model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_json: $body:expr, expect_json: $response_type:ty) => {{
-        $model.is_loading = true;
-        crux_core::Command::all([
-            crux_core::render::render(),
-            $crate::HttpCmd::post(format!("{}{}", $crate::API_BASE_URL, $endpoint))
-                .header("Content-Type", "application/json")
-                .body_json($body)
-                .expect(&format!("Failed to serialize {} request", $action))
-                .expect_json::<$response_type>()
-                .build()
-                .then_send(|result| match result {
-                    Ok(mut response) => match response.take_body() {
-                        Some(data) => $crate::Event::$response_event(Ok(data)),
-                        None => {
-                            $crate::Event::$response_event(Err("Empty response body".to_string()))
-                        }
-                    },
-                    Err(e) => $crate::Event::$response_event(Err(e.to_string())),
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_json: $body:expr, expect_json: $response_type:ty) => {{
+        $model.start_loading();
+        match $crate::HttpCmd::post($crate::build_url($endpoint))
+            .header("Content-Type", "application/json")
+            .body_json($body)
+        {
+            Ok(builder) => crux_core::Command::all([
+                crux_core::render::render(),
+                builder.build().then_send(|result| {
+                    let event_result: Result<$response_type, String> = match result {
+                        Ok(mut response) => $crate::parse_json_response($action, &mut response),
+                        Err(e) => Err(e.to_string()),
+                    };
+                    $crate::events::Event::$domain($crate::events::$domain_event::$response_event(
+                        event_result,
+                    ))
                 }),
-        ])
+            ]),
+            Err(e) => {
+                $model.set_error_and_render(format!("Failed to create {} request: {}", $action, e))
+            }
+        }
     }};
 
     // Pattern 2: POST with JSON body expecting status only
-    ($model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_json: $body:expr) => {{
-        $model.is_loading = true;
-        crux_core::Command::all([
-            crux_core::render::render(),
-            $crate::HttpCmd::post(format!("{}{}", $crate::API_BASE_URL, $endpoint))
-                .header("Content-Type", "application/json")
-                .body_json($body)
-                .expect(&format!("Failed to serialize {} request", $action))
-                .build()
-                .then_send(|result| match result {
-                    Ok(response) => {
-                        if response.status().is_success() {
-                            $crate::Event::$response_event(Ok(()))
-                        } else {
-                            $crate::Event::$response_event(Err($crate::macros::http_error(
-                                $action,
-                                response.status(),
-                            )))
-                        }
-                    }
-                    Err(e) => $crate::Event::$response_event(Err(e.to_string())),
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_json: $body:expr) => {{
+        $model.start_loading();
+        match $crate::HttpCmd::post($crate::build_url($endpoint))
+            .header("Content-Type", "application/json")
+            .body_json($body)
+        {
+            Ok(builder) => crux_core::Command::all([
+                crux_core::render::render(),
+                builder.build().then_send(|result| {
+                    let event_result = match result {
+                        Ok(mut response) => $crate::check_response_status($action, &mut response),
+                        Err(e) => Err(e.to_string()),
+                    };
+                    $crate::events::Event::$domain($crate::events::$domain_event::$response_event(
+                        event_result,
+                    ))
                 }),
-        ])
+            ]),
+            Err(e) => {
+                $model.set_error_and_render(format!("Failed to create {} request: {}", $action, e))
+            }
+        }
     }};
 
     // Pattern 3: GET expecting JSON response
-    ($model:expr, $endpoint:expr, $response_event:ident, $action:expr, method: get, expect_json: $response_type:ty) => {{
-        $model.is_loading = true;
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, method: get, expect_json: $response_type:ty) => {{
+        $model.start_loading();
         crux_core::Command::all([
             crux_core::render::render(),
-            $crate::HttpCmd::get(format!("{}{}", $crate::API_BASE_URL, $endpoint))
-                .expect_json::<$response_type>()
+            $crate::HttpCmd::get($crate::build_url($endpoint))
                 .build()
-                .then_send(|result| match result {
-                    Ok(mut response) => match response.take_body() {
-                        Some(data) => $crate::Event::$response_event(Ok(data)),
-                        None => {
-                            $crate::Event::$response_event(Err("Empty response body".to_string()))
+                .then_send(|result| {
+                    let event_result: Result<$response_type, String> = match result {
+                        Ok(mut response) => $crate::parse_json_response($action, &mut response),
+                        Err(e) => Err(e.to_string()),
+                    };
+                    $crate::events::Event::$domain($crate::events::$domain_event::$response_event(
+                        event_result,
+                    ))
+                }),
+        ])
+    }};
+}
+
+/// Macro for POST requests with Basic authentication (username:password encoded).
+///
+/// Used for login endpoint which requires Basic auth instead of Bearer token.
+/// Returns string body (e.g., auth token) on success, with optional conversion to target type.
+///
+/// NOTE: Endpoints are prefixed with `http://omnect-device` as a workaround.
+/// `crux_http` (v0.15) panics when given a relative URL in some environments (e.g. `cargo test`).
+/// The UI shell (`useCore.ts`) strips this prefix before sending the request.
+///
+/// # Example
+/// ```ignore
+/// auth_post_basic!(Auth, AuthEvent, model, "/token/login", LoginResponse, "Login",
+///     credentials: encoded_credentials,
+///     map: |token| AuthToken { token })
+/// ```
+#[macro_export]
+macro_rules! auth_post_basic {
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, credentials: $credentials:expr, map: $mapper:expr) => {{
+        $model.start_loading();
+        crux_core::Command::all([
+            crux_core::render::render(),
+            $crate::HttpCmd::post($crate::build_url($endpoint))
+                .header("Authorization", format!("Basic {}", $credentials))
+                .build()
+                .then_send(|result| {
+                    let event_result = match result {
+                        Ok(mut response) => {
+                            $crate::extract_string_response($action, &mut response).map($mapper)
                         }
-                    },
-                    Err(e) => $crate::Event::$response_event(Err(e.to_string())),
+                        Err(e) => Err(e.to_string()),
+                    };
+                    $crate::events::Event::$domain($crate::events::$domain_event::$response_event(
+                        event_result,
+                    ))
                 }),
         ])
     }};
@@ -169,6 +169,11 @@ macro_rules! unauth_post {
 
 /// Macro for authenticated POST requests with standard error handling.
 /// Reduces boilerplate for POST requests that require authentication.
+///
+/// NOTE: Endpoints are prefixed with `http://omnect-device` as a workaround.
+/// `crux_http` (v0.15) panics when given a relative URL in some environments (e.g. `cargo test`).
+/// The UI shell (`useCore.ts`) strips this prefix before sending the request.
+/// This workaround should be removed once `crux_http` supports relative URLs gracefully.
 ///
 /// # Patterns
 ///
@@ -190,96 +195,181 @@ macro_rules! unauth_post {
 ///     body_string: config
 /// )
 /// ```
+///
+/// NOTE: The macro now requires a domain parameter to specify the event wrapper.
+/// Examples:
+/// - Auth domain: `auth_post!(Auth, AuthEvent, model, "/logout", LogoutResponse, "Logout")`
+/// - Device domain: `auth_post!(Device, DeviceEvent, model, "/reboot", RebootResponse, "Reboot")`
 #[macro_export]
 macro_rules! auth_post {
     // Pattern 1: Simple POST without body
-    ($model:expr, $endpoint:expr, $response_event:ident, $action:expr) => {{
-        $model.is_loading = true;
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr) => {{
+        $model.start_loading();
         if let Some(token) = &$model.auth_token {
             crux_core::Command::all([
                 crux_core::render::render(),
-                $crate::HttpCmd::post(format!("{}{}", $crate::API_BASE_URL, $endpoint))
+                $crate::HttpCmd::post($crate::build_url($endpoint))
                     .header("Authorization", format!("Bearer {token}"))
                     .build()
-                    .then_send(|result| match result {
-                        Ok(response) => {
-                            if response.status().is_success() {
-                                $crate::Event::$response_event(Ok(()))
-                            } else {
-                                $crate::Event::$response_event(Err($crate::macros::http_error(
-                                    $action,
-                                    response.status(),
-                                )))
-                            }
-                        }
-                        Err(e) => $crate::Event::$response_event(Err(e.to_string())),
+                    .then_send(|result| {
+                        let event_result = $crate::process_status_response($action, result);
+                        $crate::events::Event::$domain(
+                            $crate::events::$domain_event::$response_event(event_result),
+                        )
                     }),
             ])
         } else {
-            crux_core::render::render()
+            $crate::handle_auth_error($model, $action)
         }
     }};
 
-    // Pattern 2: POST with JSON body
-    ($model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_json: $body:expr) => {{
-        $model.is_loading = true;
+    // Pattern 2: POST with JSON body (no JSON response expected)
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_json: $body:expr) => {{
+        $model.start_loading();
         if let Some(token) = &$model.auth_token {
-            crux_core::Command::all([
-                crux_core::render::render(),
-                $crate::HttpCmd::post(format!("{}{}", $crate::API_BASE_URL, $endpoint))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .header("Content-Type", "application/json")
-                    .body_json($body)
-                    .expect(&format!("Failed to serialize {} request", $action))
-                    .build()
-                    .then_send(|result| match result {
-                        Ok(response) => {
-                            if response.status().is_success() {
-                                $crate::Event::$response_event(Ok(()))
-                            } else {
-                                $crate::Event::$response_event(Err($crate::macros::http_error(
-                                    $action,
-                                    response.status(),
-                                )))
-                            }
-                        }
-                        Err(e) => $crate::Event::$response_event(Err(e.to_string())),
+            match $crate::HttpCmd::post($crate::build_url($endpoint))
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .body_json($body)
+            {
+                Ok(builder) => crux_core::Command::all([
+                    crux_core::render::render(),
+                    builder.build().then_send(|result| {
+                        let event_result = $crate::process_status_response($action, result);
+                        $crate::events::Event::$domain(
+                            $crate::events::$domain_event::$response_event(event_result),
+                        )
                     }),
-            ])
+                ]),
+                Err(e) => $crate::handle_request_error($model, $action, e),
+            }
         } else {
-            crux_core::render::render()
+            $crate::handle_auth_error($model, $action)
         }
     }};
 
-    // Pattern 3: POST with string body
-    ($model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_string: $body:expr) => {{
-        $model.is_loading = true;
+    // Pattern 3: POST with string body (no JSON response expected)
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_string: $body:expr) => {{
+        $model.start_loading();
         if let Some(token) = &$model.auth_token {
             crux_core::Command::all([
                 crux_core::render::render(),
-                $crate::HttpCmd::post(format!("{}{}", $crate::API_BASE_URL, $endpoint))
+                $crate::HttpCmd::post($crate::build_url($endpoint))
                     .header("Authorization", format!("Bearer {token}"))
                     .header("Content-Type", "application/json")
                     .body_string($body)
                     .build()
-                    .then_send(|result| match result {
-                        Ok(response) => {
-                            if response.status().is_success() {
-                                $crate::Event::$response_event(Ok(()))
-                            } else {
-                                $crate::Event::$response_event(Err($crate::macros::http_error(
-                                    $action,
-                                    response.status(),
-                                )))
-                            }
-                        }
-                        Err(e) => $crate::Event::$response_event(Err(e.to_string())),
+                    .then_send(|result| {
+                        let event_result = $crate::process_status_response($action, result);
+                        $crate::events::Event::$domain(
+                            $crate::events::$domain_event::$response_event(event_result),
+                        )
                     }),
             ])
         } else {
-            crux_core::render::render()
+            $crate::handle_auth_error($model, $action)
         }
     }};
+
+    // Pattern 4: POST with JSON body expecting JSON response
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_json: $body:expr, expect_json: $response_type:ty) => {{
+        $model.start_loading();
+        if let Some(token) = &$model.auth_token {
+            match $crate::HttpCmd::post($crate::build_url($endpoint))
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .body_json($body)
+            {
+                Ok(builder) => crux_core::Command::all([
+                    crux_core::render::render(),
+                    builder.build().then_send(|result| {
+                        let event_result: Result<$response_type, String> =
+                            $crate::process_json_response($action, result);
+                        $crate::events::Event::$domain(
+                            $crate::events::$domain_event::$response_event(event_result),
+                        )
+                    }),
+                ]),
+                Err(e) => $crate::handle_request_error($model, $action, e),
+            }
+        } else {
+            $crate::handle_auth_error($model, $action)
+        }
+    }};
+
+    // Pattern 5: POST with string body expecting JSON response
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_string: $body:expr, expect_json: $response_type:ty) => {{
+        $model.start_loading();
+        if let Some(token) = &$model.auth_token {
+            crux_core::Command::all([
+                crux_core::render::render(),
+                $crate::HttpCmd::post($crate::build_url($endpoint))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("Content-Type", "application/json")
+                    .body_string($body)
+                    .build()
+                    .then_send(|result| {
+                        let event_result: Result<$response_type, String> =
+                            $crate::process_json_response($action, result);
+                        $crate::events::Event::$domain(
+                            $crate::events::$domain_event::$response_event(event_result),
+                        )
+                    }),
+            ])
+        } else {
+            $crate::handle_auth_error($model, $action)
+        }
+    }};
+}
+
+/// Macro for simple HTTP GET requests expecting JSON response.
+/// Does not set loading state or require authentication.
+/// Requires domain parameters for event wrapping.
+///
+/// # Example
+/// ```ignore
+/// http_get!(Device, DeviceEvent, "http://omnect-device/healthcheck", HealthcheckResponse, HealthcheckInfo)
+/// ```
+#[macro_export]
+macro_rules! http_get {
+    ($domain:ident, $domain_event:ident, $url:expr, $response_event:ident, $response_type:ty) => {
+        $crate::HttpCmd::get($url).build().then_send(|result| {
+            let event_result: Result<$response_type, String> = match result {
+                Ok(mut response) => {
+                    $crate::parse_json_response(stringify!($response_event), &mut response)
+                }
+                Err(e) => Err(e.to_string()),
+            };
+            $crate::events::Event::$domain($crate::events::$domain_event::$response_event(
+                event_result,
+            ))
+        })
+    };
+}
+
+/// Silent HTTP GET - no loading state, custom success/error event handlers.
+///
+/// Used for background polling where failures should not show errors to user.
+/// Does NOT check for shell hack header (since success returns custom event anyway).
+///
+/// # Example
+/// ```ignore
+/// http_get_silent!(
+///     url,
+///     on_success: Event::Device(DeviceEvent::HealthcheckResponse(Ok(HealthcheckInfo::default()))),
+///     on_error: Event::Ui(UiEvent::ClearSuccess)
+/// )
+/// ```
+#[macro_export]
+macro_rules! http_get_silent {
+    ($url:expr, on_success: $success_event:expr, on_error: $error_event:expr) => {
+        $crate::HttpCmd::get($url)
+            .build()
+            .then_send(move |result| match result {
+                Ok(response) if response.status().is_success() => $success_event,
+                _ => $error_event,
+            })
+    };
 }
 
 /// Macro for handling response events with standard loading state and error handling.
@@ -327,13 +417,13 @@ macro_rules! handle_response {
     ($model:expr, $result:expr, {
         success_message: $msg:expr $(,)?
     }) => {{
-        $model.is_loading = false;
+        $model.stop_loading();
         match $result {
             Ok(()) => {
                 $model.success_message = Some($msg.to_string());
             }
             Err(e) => {
-                $model.error_message = Some(e);
+                $model.set_error(e);
             }
         }
         crux_core::render::render()
@@ -343,7 +433,7 @@ macro_rules! handle_response {
     ($model:expr, $result:expr, {
         on_success: |$success_model:ident, $value:tt| $success_body:block $(,)?
     }) => {{
-        $model.is_loading = false;
+        $model.stop_loading();
         match $result {
             Ok($value) => {
                 #[allow(clippy::redundant_locals)]
@@ -351,7 +441,7 @@ macro_rules! handle_response {
                 $success_body
             }
             Err(e) => {
-                $model.error_message = Some(e);
+                $model.set_error(e);
             }
         }
         crux_core::render::render()
@@ -362,7 +452,7 @@ macro_rules! handle_response {
         on_success: |$success_model:ident, $value:tt| $success_body:block,
         success_message: $msg:expr $(,)?
     }) => {{
-        $model.is_loading = false;
+        $model.stop_loading();
         match $result {
             Ok($value) => {
                 #[allow(clippy::redundant_locals)]
@@ -371,7 +461,7 @@ macro_rules! handle_response {
                 $model.success_message = Some($msg.to_string());
             }
             Err(e) => {
-                $model.error_message = Some(e);
+                $model.set_error(e);
             }
         }
         crux_core::render::render()
@@ -382,6 +472,7 @@ macro_rules! handle_response {
         on_success: |$success_model:ident, $value:tt| $success_body:block,
         no_loading: true $(,)?
     }) => {{
+        $model.clear_error();
         match $result {
             Ok($value) => {
                 #[allow(clippy::redundant_locals)]

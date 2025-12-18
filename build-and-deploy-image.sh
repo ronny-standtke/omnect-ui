@@ -10,9 +10,11 @@ set -e
 # Default configuration
 DEVICE_HOST="${DEVICE_HOST:-}"
 DEVICE_USER="${DEVICE_USER:-omnect}"
+DEVICE_PASS="${DEVICE_PASS:-}"
 DEVICE_PORT="${DEVICE_PORT:-1977}"
 IMAGE_TAG="${IMAGE_TAG:-$(whoami)}"
 IMAGE_ARCH="${IMAGE_ARCH:-arm64}"
+DOCKER_NAMESPACE="${DOCKER_NAMESPACE:-omnectweucopsacr.azurecr.io}"
 IMAGE_NAME="omnectshareddevacr.azurecr.io/omnect-ui:${IMAGE_TAG}"
 IMAGE_TAR="/tmp/omnect-ui-${IMAGE_ARCH}.tar"
 
@@ -29,16 +31,20 @@ OPTIONS:
   --arch <arch>         Target architecture (default: $IMAGE_ARCH)
   --host <hostname>     Target device hostname or IP (required when using --deploy)
   --user <username>     SSH user for target device (default: $DEVICE_USER)
+  --password <password> SSH password for target device (default: $DEVICE_PASS)
   --port <port>         UI port on target device (default: $DEVICE_PORT)
   --tag <tag>           Docker image tag (default: \$(whoami))
+  --namespace <ns>      Docker registry namespace (default: omnectweucopsacr.azurecr.io)
   --help                Show this help message
 
 ENVIRONMENT VARIABLES:
   DEVICE_HOST           Target device hostname or IP (required when using --deploy)
   DEVICE_USER           SSH user for target device (default: omnect)
+  DEVICE_PASS           SSH password for target device
   DEVICE_PORT           UI port on target device (default: 1977)
   IMAGE_TAG             Docker image tag (default: \$(whoami))
   IMAGE_ARCH            Target architecture (default: arm64)
+  DOCKER_NAMESPACE      Docker registry namespace (default: omnectweucopsacr.azurecr.io)
 
 EXAMPLES:
   $0                                    # Build only (arm64)
@@ -46,6 +52,7 @@ EXAMPLES:
   $0 --clean                            # Clean build without cache
   $0 --push                             # Build and push to registry
   $0 --deploy --host 192.168.1.100      # Build and deploy to specific device
+  $0 --deploy --host 192.168.1.100 --password mypassword # Build and deploy with password
   $0 --push --deploy --host 192.168.1.100  # Build, push to registry, and deploy
   $0 --tag v1.2.0 --deploy --host 192.168.1.100  # Build with custom tag and deploy
   $0 --deploy --host 192.168.1.100 --port 8080   # Build and deploy with custom port
@@ -84,6 +91,10 @@ while [[ $# -gt 0 ]]; do
       DEVICE_USER="$2"
       shift 2
       ;;
+    --password)
+      DEVICE_PASS="$2"
+      shift 2
+      ;;
     --port)
       DEVICE_PORT="$2"
       shift 2
@@ -91,6 +102,10 @@ while [[ $# -gt 0 ]]; do
     --tag)
       IMAGE_TAG="$2"
       IMAGE_NAME="omnectshareddevacr.azurecr.io/omnect-ui:${IMAGE_TAG}"
+      shift 2
+      ;;
+    --namespace)
+      DOCKER_NAMESPACE="$2"
       shift 2
       ;;
     --help)
@@ -117,15 +132,22 @@ fi
 # local build
 omnect_ui_version=$(toml get --raw Cargo.toml workspace.package.version)
 
+# Get git short revision for version tracking
+GIT_SHORT_REV=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
 echo "Building ${IMAGE_ARCH} image: $IMAGE_NAME"
+echo "Git revision: $GIT_SHORT_REV"
+
+# Ensure access to registry
+az acr login --name ${DOCKER_NAMESPACE}
 
 # Setup QEMU for cross-architecture builds if needed
 if [[ "$IMAGE_ARCH" != "$(uname -m)" ]]; then
-  docker run --rm --privileged omnectweucopsacr.azurecr.io/mlilien/qemu-user-static:8.1.2 --reset -p yes
+  docker run --rm --privileged ${DOCKER_NAMESPACE}/mlilien/qemu-user-static:8.1.2 --reset -p yes
 fi
 
 # Build with or without cache
-BUILD_ARGS="--platform linux/${IMAGE_ARCH} --load -f Dockerfile . -t $IMAGE_NAME"
+BUILD_ARGS="--platform linux/${IMAGE_ARCH} --load -f Dockerfile . -t $IMAGE_NAME --build-arg GIT_SHORT_REV=$GIT_SHORT_REV --build-arg DOCKER_NAMESPACE=${DOCKER_NAMESPACE}"
 if [[ "$CLEAN" == "true" ]]; then
   echo "Performing clean build (no cache)..."
   docker buildx build --no-cache $BUILD_ARGS
@@ -146,21 +168,24 @@ if [[ "$DEPLOY" == "true" ]]; then
   docker save "$IMAGE_NAME" -o "$IMAGE_TAR"
 
   echo "Copying image to device $DEVICE_HOST..."
-  scp "$IMAGE_TAR" "${DEVICE_USER}@${DEVICE_HOST}:/tmp/"
+  if [ -n "$DEVICE_PASS" ]; then
+    sshpass -p "$DEVICE_PASS" scp "$IMAGE_TAR" "${DEVICE_USER}@${DEVICE_HOST}:/tmp/"
+  else
+    scp "$IMAGE_TAR" "${DEVICE_USER}@${DEVICE_HOST}:/tmp/"
+  fi
 
   echo "Loading image on device and restarting container..."
-  ssh "${DEVICE_USER}@${DEVICE_HOST}" << EOF
-    set -e
+
+  CMD="set -e
 
     # Check required directories exist
-    echo "Checking required directories..."
+    echo 'Checking required directories...'
     for dir in /run/omnect-device-service /var/lib/omnect-ui /etc/systemd/network; do
-      if [ ! -d "\$dir" ]; then
-        echo "ERROR: Required directory \$dir does not exist on device"
-        exit 1
+      if [ ! -d \"\$dir\" ]; then
+        echo \"WARNING: Required directory \$dir does not exist on device\"
       fi
     done
-    echo "All required directories exist"
+    echo 'All required directories exist'
 
     sudo iotedge system stop
     sudo docker container rm -f omnect-ui
@@ -168,9 +193,13 @@ if [[ "$DEPLOY" == "true" ]]; then
     sudo docker load -i /tmp/omnect-ui-${IMAGE_ARCH}.tar
     rm /tmp/omnect-ui-${IMAGE_ARCH}.tar
     sleep 5
-    sudo iotedge system restart
+    sudo iotedge system restart"
 
-EOF
+  if [ -n "$DEVICE_PASS" ]; then
+    sshpass -p "$DEVICE_PASS" ssh "${DEVICE_USER}@${DEVICE_HOST}" "$CMD"
+  else
+    ssh "${DEVICE_USER}@${DEVICE_HOST}" "$CMD"
+  fi
 
   echo "Cleaning up local tar file..."
   rm -f "$IMAGE_TAR"

@@ -3,6 +3,7 @@
 use crate::{
     config::AppConfig,
     http_client::{handle_http_response, unix_socket_client},
+    services::network::NetworkConfigService,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use log::info;
@@ -97,6 +98,7 @@ pub struct VersionInfo {
 pub struct HealthcheckInfo {
     pub version_info: VersionInfo,
     pub update_validation_status: UpdateValidationStatus,
+    pub network_rollback_occurred: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -325,6 +327,7 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
                 mismatch: !required_version.matches(&parsed_current),
             },
             update_validation_status: status.update_validation_status,
+            network_rollback_occurred: NetworkConfigService::rollback_occurred(),
         })
     }
 

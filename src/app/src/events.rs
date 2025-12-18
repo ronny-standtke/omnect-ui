@@ -1,15 +1,11 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
-use crate::capabilities::centrifugo::CentrifugoOutput;
 use crate::types::*;
 
-/// Events that can happen in the app
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub enum Event {
-    // Initialization
-    Initialize,
-
-    // Authentication
+/// Authentication events
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum AuthEvent {
     Login {
         password: String,
     },
@@ -18,45 +14,10 @@ pub enum Event {
         password: String,
     },
     UpdatePassword {
-        current: String,
-        new_password: String,
+        current_password: String,
+        password: String,
     },
     CheckRequiresPasswordSet,
-
-    // Device actions
-    Reboot,
-    FactoryResetRequest {
-        mode: String,
-        preserve: Vec<String>,
-    },
-    ReloadNetwork,
-
-    // Network configuration
-    SetNetworkConfig {
-        config: String,
-    },
-
-    // Update actions
-    LoadUpdate {
-        file_path: String,
-    },
-    RunUpdate {
-        validate_iothub: bool,
-    },
-
-    // WebSocket subscriptions
-    SubscribeToChannels,
-    UnsubscribeFromChannels,
-
-    // WebSocket updates (from Centrifugo)
-    SystemInfoUpdated(SystemInfo),
-    NetworkStatusUpdated(NetworkStatus),
-    OnlineStatusUpdated(OnlineStatus),
-    FactoryResetUpdated(FactoryReset),
-    UpdateValidationStatusUpdated(UpdateValidationStatus),
-    TimeoutsUpdated(Timeouts),
-
-    // HTTP responses (internal events, skipped from serialization)
     #[serde(skip)]
     LoginResponse(Result<AuthToken, String>),
     #[serde(skip)]
@@ -67,30 +28,144 @@ pub enum Event {
     UpdatePasswordResponse(Result<(), String>),
     #[serde(skip)]
     CheckRequiresPasswordSetResponse(Result<bool, String>),
+}
+
+/// Device operation events
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum DeviceEvent {
+    Reboot,
+    FactoryResetRequest {
+        mode: String,
+        preserve: Vec<String>,
+    },
+    SetNetworkConfig {
+        config: String,
+    },
+    NetworkFormStartEdit {
+        adapter_name: String,
+    },
+    NetworkFormUpdate {
+        form_data: String,
+    },
+    NetworkFormReset {
+        adapter_name: String,
+    },
+    LoadUpdate {
+        file_path: String,
+    },
+    UploadStarted,
+    UploadProgress(u8),
+    UploadCompleted(String),
+    UploadFailed(String),
+    RunUpdate {
+        validate_iothub_connection: bool,
+    },
+    ReconnectionCheckTick,
+    ReconnectionTimeout,
+    NewIpCheckTick,
+    NewIpCheckTimeout,
+    AckRollback,
     #[serde(skip)]
     RebootResponse(Result<(), String>),
     #[serde(skip)]
     FactoryResetResponse(Result<(), String>),
     #[serde(skip)]
-    ReloadNetworkResponse(Result<(), String>),
+    SetNetworkConfigResponse(Result<crate::types::SetNetworkConfigResponse, String>),
     #[serde(skip)]
-    SetNetworkConfigResponse(Result<(), String>),
-    #[serde(skip)]
-    LoadUpdateResponse(Result<(), String>),
+    LoadUpdateResponse(Result<UpdateManifest, String>),
     #[serde(skip)]
     RunUpdateResponse(Result<(), String>),
     #[serde(skip)]
     HealthcheckResponse(Result<HealthcheckInfo, String>),
+    #[serde(skip)]
+    AckRollbackResponse(Result<(), String>),
+}
 
-    // Connection state
+/// WebSocket/Centrifugo events
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum WebSocketEvent {
+    SubscribeToChannels,
+    UnsubscribeFromChannels,
+    SystemInfoUpdated(SystemInfo),
+    NetworkStatusUpdated(NetworkStatus),
+    OnlineStatusUpdated(OnlineStatus),
+    FactoryResetUpdated(FactoryReset),
+    UpdateValidationStatusUpdated(UpdateValidationStatus),
+    TimeoutsUpdated(Timeouts),
     Connected,
     Disconnected,
+}
 
-    // Centrifugo responses (internal events)
-    #[serde(skip)]
-    CentrifugoResponse(CentrifugoOutput),
-
-    // UI actions
+/// UI action events
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum UiEvent {
     ClearError,
     ClearSuccess,
+}
+
+/// Main event enum - wraps domain events
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum Event {
+    Initialize,
+    Auth(AuthEvent),
+    Device(DeviceEvent),
+    WebSocket(WebSocketEvent),
+    Ui(UiEvent),
+}
+
+/// Custom Debug implementation for AuthEvent to redact sensitive data
+impl fmt::Debug for AuthEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AuthEvent::Login { .. } => f
+                .debug_struct("Login")
+                .field("password", &"<redacted>")
+                .finish(),
+            AuthEvent::SetPassword { .. } => f
+                .debug_struct("SetPassword")
+                .field("password", &"<redacted>")
+                .finish(),
+            AuthEvent::UpdatePassword { .. } => f
+                .debug_struct("UpdatePassword")
+                .field("current_password", &"<redacted>")
+                .field("password", &"<redacted>")
+                .finish(),
+            AuthEvent::LoginResponse(result) => match result {
+                Ok(_) => f
+                    .debug_tuple("LoginResponse")
+                    .field(&"Ok(<redacted token>)")
+                    .finish(),
+                Err(e) => f
+                    .debug_tuple("LoginResponse")
+                    .field(&format!("Err({e})"))
+                    .finish(),
+            },
+            AuthEvent::Logout => write!(f, "Logout"),
+            AuthEvent::CheckRequiresPasswordSet => write!(f, "CheckRequiresPasswordSet"),
+            AuthEvent::LogoutResponse(r) => f.debug_tuple("LogoutResponse").field(r).finish(),
+            AuthEvent::SetPasswordResponse(r) => {
+                f.debug_tuple("SetPasswordResponse").field(r).finish()
+            }
+            AuthEvent::UpdatePasswordResponse(r) => {
+                f.debug_tuple("UpdatePasswordResponse").field(r).finish()
+            }
+            AuthEvent::CheckRequiresPasswordSetResponse(r) => f
+                .debug_tuple("CheckRequiresPasswordSetResponse")
+                .field(r)
+                .finish(),
+        }
+    }
+}
+
+/// Custom Debug implementation for Event
+impl fmt::Debug for Event {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Event::Initialize => write!(f, "Initialize"),
+            Event::Auth(e) => write!(f, "Auth({e:?})"),
+            Event::Device(e) => write!(f, "Device({e:?})"),
+            Event::WebSocket(e) => write!(f, "WebSocket({e:?})"),
+            Event::Ui(e) => write!(f, "Ui({e:?})"),
+        }
+    }
 }

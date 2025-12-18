@@ -44,6 +44,7 @@ pub struct CentrifugoConfig {
     pub publish_endpoint: crate::omnect_device_service_client::PublishEndpoint,
     pub log_level: String,
     pub binary_path: PathBuf,
+    pub config_path: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -167,12 +168,17 @@ impl CentrifugoConfig {
             ],
         };
 
-        // In test/mock mode, use a dummy path since the binary is not actually executed
+        // In test/mock mode, use the local centrifugo instance
         #[cfg(any(test, feature = "mock"))]
-        let binary_path = PathBuf::from("centrifugo_path");
+        let binary_path = PathBuf::from("tools/centrifugo");
         #[cfg(not(any(test, feature = "mock")))]
         let binary_path =
             std::fs::canonicalize("centrifugo").context("failed to find centrifugo binary")?;
+
+        #[cfg(any(test, feature = "mock"))]
+        let config_path = PathBuf::from("src/backend/config/centrifugo_config.json");
+        #[cfg(not(any(test, feature = "mock")))]
+        let config_path = PathBuf::from("/centrifugo_config.json");
 
         Ok(Self {
             port,
@@ -181,14 +187,19 @@ impl CentrifugoConfig {
             publish_endpoint,
             log_level,
             binary_path,
+            config_path,
         })
     }
 }
 
 impl KeycloakConfig {
     fn load() -> Result<Self> {
-        let url = env::var("KEYCLOAK_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:8080/realms/omnect".to_string());
+        let url = if cfg!(any(test, feature = "mock")) {
+            env::var("KEYCLOAK_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:8080/realms/omnect".to_string())
+        } else {
+            env::var("KEYCLOAK_URL")?
+        };
 
         Ok(Self { url })
     }
@@ -265,14 +276,29 @@ impl IoTEdgeConfig {
 
 impl PathConfig {
     fn load() -> Result<Self> {
-        let data_dir = Self::data_dir();
-        let config_dir = data_dir.join("config");
+        #[cfg(not(any(test, feature = "mock")))]
+        let (data_dir, host_data_dir) = (
+            PathBuf::from("/data/"),
+            PathBuf::from("/var/lib/").join(env!("CARGO_PKG_NAME")),
+        );
+
+        // In test mode, use temp directory as default
+        #[cfg(any(test, feature = "mock"))]
+        let (data_dir, host_data_dir) = {
+            let data_dir = std::env::temp_dir().join("omnect-ui-test");
+
+            std::fs::create_dir_all(&data_dir)
+                .context("failed to create data directory")
+                .unwrap();
+
+            (data_dir.clone(), data_dir)
+        };
 
         // Ensure config directory exists (skip in test/mock mode as it may not have permissions)
+        let config_dir = data_dir.join("config");
         std::fs::create_dir_all(&config_dir).context("failed to create config directory")?;
 
         let app_config_path = config_dir.join("app_config.js");
-        let host_data_dir = PathBuf::from(format!("/var/lib/{}/", env!("CARGO_PKG_NAME")));
         let password_file = config_dir.join("password");
         let host_update_file = host_data_dir.join("update.tar");
         let local_update_file = data_dir.join("update.tar");
@@ -286,21 +312,5 @@ impl PathConfig {
             local_update_file,
             tmp_update_file,
         })
-    }
-
-    #[cfg(not(any(test, feature = "mock")))]
-    fn data_dir() -> PathBuf {
-        PathBuf::from("/data/")
-    }
-
-    // In test mode, use temp directory as default to avoid /data requirement
-    #[cfg(any(test, feature = "mock"))]
-    fn data_dir() -> PathBuf {
-        let data_dir = std::env::temp_dir().join("omnect-ui-test");
-
-        std::fs::create_dir_all(&data_dir)
-            .context("failed to create data directory")
-            .unwrap();
-        data_dir
     }
 }

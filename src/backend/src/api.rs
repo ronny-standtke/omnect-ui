@@ -6,7 +6,7 @@ use crate::{
     services::{
         auth::{AuthorizationService, PasswordService, TokenManager},
         firmware::FirmwareService,
-        network::{NetworkConfig, NetworkConfigService},
+        network::{NetworkConfigService, SetNetworkConfigRequest},
     },
 };
 use actix_files::NamedFile;
@@ -122,11 +122,6 @@ where
         handle_service_result(api.service_client.reboot().await, "reboot")
     }
 
-    pub async fn reload_network(api: web::Data<Self>) -> impl Responder {
-        debug!("reload_network() called");
-        handle_service_result(api.service_client.reload_network().await, "reload_network")
-    }
-
     pub async fn token(session: Session, token_manager: web::Data<TokenManager>) -> impl Responder {
         debug!("token() called");
 
@@ -216,13 +211,8 @@ where
     pub async fn require_set_password() -> impl Responder {
         debug!("require_set_password() called");
 
-        if !PasswordService::password_exists() {
-            return HttpResponse::Created()
-                .append_header(("Location", "/set-password"))
-                .finish();
-        }
-
-        HttpResponse::Ok().finish()
+        let password_exists = PasswordService::password_exists();
+        HttpResponse::Ok().json(!password_exists)
     }
 
     pub async fn validate_portal_token(body: String, api: web::Data<Self>) -> impl Responder {
@@ -243,7 +233,7 @@ where
     }
 
     pub async fn set_network_config(
-        network_config: web::Json<NetworkConfig>,
+        network_config: web::Json<SetNetworkConfigRequest>,
         api: web::Data<Self>,
     ) -> impl Responder {
         debug!("set_network_config() called");
@@ -252,6 +242,12 @@ where
             NetworkConfigService::set_network_config(&api.service_client, &network_config).await,
             "set_network_config",
         )
+    }
+
+    pub async fn ack_rollback() -> impl Responder {
+        debug!("ack_rollback() called");
+        NetworkConfigService::clear_rollback_occurred();
+        HttpResponse::Ok().finish()
     }
 
     fn session_token(session: Session, token_manager: web::Data<TokenManager>) -> HttpResponse {

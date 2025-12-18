@@ -6,18 +6,25 @@ fn main() {
     // Tell Cargo to only rerun this build script if specific files change
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../ui/dist");
-    println!("cargo:rerun-if-changed=../.git/HEAD");
-    println!("cargo:rerun-if-changed=../.git/refs/heads");
+    println!("cargo:rerun-if-env-changed=GIT_SHORT_REV");
 
-    let git_short_rev = String::from_utf8(
-        Command::new("git")
-            .args(["rev-parse", "--short", "HEAD"])
-            .output()
-            .unwrap()
-            .stdout,
-    )
-    .unwrap();
-    let git_short_rev = git_short_rev.trim();
+    // Try to get git revision from environment variable (Docker build) or git command (local build)
+    let git_short_rev = std::env::var("GIT_SHORT_REV").unwrap_or_else(|_| {
+        // Fallback to git command for local development
+        println!("cargo:rerun-if-changed=../.git/HEAD");
+        println!("cargo:rerun-if-changed=../.git/refs/heads");
+
+        String::from_utf8(
+            Command::new("git")
+                .args(["rev-parse", "--short", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string()
+    });
 
     println!("cargo:rustc-env=GIT_SHORT_REV={git_short_rev}");
 

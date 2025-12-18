@@ -1,6 +1,7 @@
 export type HealthcheckResponse = {
 	version_info: VersionInfo
 	update_validation_status: UpdateValidationStatus
+	network_rollback_occurred: boolean
 }
 
 export type VersionInfo = {

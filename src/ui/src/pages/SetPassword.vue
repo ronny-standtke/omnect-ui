@@ -1,57 +1,32 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
-import { useRouter } from "vue-router"
-import OmnectLogo from "../components/OmnectLogo.vue"
-import { useCentrifuge } from "../composables/useCentrifugo"
+import OmnectLogo from "../components/branding/OmnectLogo.vue"
+import PasswordField from "../components/common/PasswordField.vue"
+import { useCore } from "../composables/useCore"
+import { useCoreInitialization } from "../composables/useCoreInitialization"
+import { useMessageWatchers } from "../composables/useMessageWatchers"
+import { usePasswordForm } from "../composables/usePasswordForm"
+import { useAuthNavigation } from "../composables/useAuthNavigation"
 
-const router = useRouter()
-const { initializeCentrifuge, unsubscribeAll, disconnect } = useCentrifuge()
-const password = ref<string>("")
-const repeatPassword = ref<string>("")
-const visible = ref(false)
-const errorMsg = ref("")
+const { setPassword, login } = useCore()
+const { password, repeatPassword, errorMsg, validatePasswords } = usePasswordForm()
 
-const handleSubmit = async (): Promise<void> => {
-	try {
-		errorMsg.value = ""
-		if (password.value !== repeatPassword.value) {
-			errorMsg.value = "Passwords do not match."
-		} else {
-			const res = await fetch("set-password", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json"
-				},
-				body: JSON.stringify({
-					password: password.value
-				})
-			})
+useCoreInitialization()
+useAuthNavigation()
 
-			if (res.ok) {
-				initializeCentrifuge()
-				await router.push("/")
-			} else {
-				errorMsg.value = "Something went wrong while setting your password."
-			}
-		}
-	} catch (error) {
-		errorMsg.value = "Failed to set password."
-	}
-}
-
-onMounted(async () => {
-	try {
-		const requireSetPassword = await fetch("require-set-password")
-		if (requireSetPassword.status !== 201) {
-			router.push("/")
-		} else {
-			unsubscribeAll()
-			disconnect()
-		}
-	} catch {
-		router.push("/login")
+useMessageWatchers({
+	onSuccess: async () => {
+		// Automatically log in with the new password
+		await login(password.value)
+	},
+	onError: (message) => {
+		errorMsg.value = message
 	}
 })
+
+const handleSubmit = async (): Promise<void> => {
+	if (!validatePasswords()) return
+	await setPassword(password.value)
+}
 </script>
 
 <template>
@@ -59,14 +34,14 @@ onMounted(async () => {
 		<OmnectLogo></OmnectLogo>
 		<h1>Set Password</h1>
 		<v-form @submit.prevent @submit="handleSubmit">
-			<v-text-field label="Password" :append-inner-icon="visible ? 'mdi-eye-off' : 'mdi-eye'"
-				:type="visible ? 'text' : 'password'" density="compact" placeholder="Enter your password"
-				prepend-inner-icon="mdi-lock-outline" variant="outlined" @click:append-inner="visible = !visible"
-				v-model="password" autocomplete="new-password"></v-text-field>
-			<v-text-field label="Repeat password" :append-inner-icon="visible ? 'mdi-eye-off' : 'mdi-eye'"
-				:type="visible ? 'text' : 'password'" density="compact" placeholder="Repeat your password"
-				prepend-inner-icon="mdi-lock-outline" variant="outlined" @click:append-inner="visible = !visible"
-				v-model="repeatPassword" autocomplete="new-password"></v-text-field>
+			<PasswordField
+				v-model="password"
+				label="Password"
+			/>
+			<PasswordField
+				v-model="repeatPassword"
+				label="Repeat password"
+			/>
 			<p style="color: rgb(var(--v-theme-error))">{{ errorMsg }}</p>
 			<v-btn class="mb-8" color="secondary" size="large" variant="text" type="submit" block>
 				Set password

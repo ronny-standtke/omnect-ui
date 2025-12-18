@@ -14,6 +14,20 @@ lazy_static! {
     static ref CORE: Bridge<App> = Bridge::new(Core::new());
 }
 
+/// Initialize the WASM module and set up logging
+///
+/// This runs automatically when the WASM module is loaded.
+/// To control log level from JavaScript:
+/// ```javascript
+/// // Set log level before importing WASM module
+/// localStorage.setItem('rust_log', 'debug'); // or 'info', 'warn', 'error'
+/// ```
+#[wasm_bindgen(start)]
+pub fn init_wasm() {
+    // Initialize console_log with log level from localStorage or default to Info
+    console_log::init_with_level(log::Level::Debug).expect("Failed to initialize logger");
+}
+
 /// Process an event from JavaScript
 ///
 /// Takes a bincode-serialized Event and returns bincode-serialized Effects.

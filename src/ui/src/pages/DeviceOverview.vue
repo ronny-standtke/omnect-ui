@@ -1,30 +1,6 @@
 <script setup lang="ts">
-import DeviceActions from "../components/DeviceActions.vue"
-import DeviceInfo from "../components/DeviceInfoCore.vue"
-import { useOverlaySpinner } from "../composables/useOverlaySpinner"
-import { useWaitReconnect } from "../composables/useWaitReconnect"
-
-const { overlaySpinnerState } = useOverlaySpinner()
-const { startWaitReconnect, onTimeout } = useWaitReconnect()
-
-const showIsRebooting = () => {
-	overlaySpinnerState.title = "Device is rebooting"
-	overlaySpinnerState.overlay = true
-	startWaitReconnect()
-}
-
-const showIsResetting = () => {
-	overlaySpinnerState.title = "The device is resetting"
-	overlaySpinnerState.text =
-		"Please have some patience, the resetting may take some time. The app will be removed from the device. If the device is online the app will be reinstalled automatically after some time."
-	overlaySpinnerState.overlay = true
-	startWaitReconnect()
-}
-
-onTimeout(() => {
-	overlaySpinnerState.text = `${overlaySpinnerState.text} The device did not come back online after 5 minutes. Please check the device manually.`
-	overlaySpinnerState.timedOut = true
-})
+import DeviceActions from "../components/device/DeviceActions.vue"
+import DeviceInfo from "../components/device/DeviceInfoCore.vue"
 </script>
 
 <template>
@@ -33,8 +9,7 @@ onTimeout(() => {
 			<div class="flex flex-col gap-y-16">
 				<DeviceInfo />
 			</div>
-			<DeviceActions @reboot-in-progress="showIsRebooting" @factory-reset-in-progress="showIsResetting">
-			</DeviceActions>
+			<DeviceActions></DeviceActions>
 		</div>
 	</v-sheet>
 </template>

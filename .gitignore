@@ -6,7 +6,9 @@ tools/centrifugo
 *.env
 *.http
 /dist
-CLAUDE.md
+.claude/
+.gemini/
+.pnpm-store/
 
 # Generated WASM package (rebuild with wasm-pack)
 src/ui/src/core/pkg/

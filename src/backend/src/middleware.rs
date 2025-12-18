@@ -6,7 +6,7 @@ use actix_web::{
     dev::{Service, ServiceRequest, ServiceResponse, Transform, forward_ready},
     web,
 };
-use actix_web_httpauth::extractors::basic::BasicAuth;
+use actix_web_httpauth::extractors::{basic::BasicAuth, bearer::BearerAuth};
 use anyhow::Result;
 use log::error;
 use std::{
@@ -67,11 +67,12 @@ where
             };
 
             // Extract TokenManager from app data
-            let Some(token_manager) = req.app_data::<web::Data<TokenManager>>() else {
+            let Some(token_manager) = req.app_data::<web::Data<TokenManager>>().cloned() else {
                 error!("failed to get TokenManager.");
                 return Ok(unauthorized_error(req).map_into_right_body());
             };
 
+            // 1. Check Session Cookie
             if token_manager.verify_token(&token) {
                 let res = service.call(req).await?;
                 return Ok(res.map_into_left_body());
@@ -79,17 +80,32 @@ where
 
             let mut payload = req.take_payload().take();
 
-            let Ok(auth) = BasicAuth::from_request(req.request(), &mut payload).await else {
-                return Ok(unauthorized_error(req).map_into_right_body());
-            };
+            // Check Authorization header to decide which auth scheme to try
+            let auth_header = req.headers().get(actix_web::http::header::AUTHORIZATION);
 
-            let true = verify_user(auth) else {
-                return Ok(unauthorized_error(req).map_into_right_body());
-            };
+            if let Some(header_value) = auth_header
+                && let Ok(header_str) = header_value.to_str()
+            {
+                if header_str.starts_with("Bearer ") {
+                    // 2. Check Bearer Token
+                    if let Ok(auth) = BearerAuth::from_request(req.request(), &mut payload).await
+                        && token_manager.verify_token(auth.token())
+                    {
+                        let res = service.call(req).await?;
+                        return Ok(res.map_into_left_body());
+                    }
+                } else if header_str.starts_with("Basic ") {
+                    // 3. Check Basic Auth
+                    if let Ok(auth) = BasicAuth::from_request(req.request(), &mut payload).await
+                        && verify_user(auth)
+                    {
+                        let res = service.call(req).await?;
+                        return Ok(res.map_into_left_body());
+                    }
+                }
+            }
 
-            let res = service.call(req).await?;
-
-            Ok(res.map_into_left_body())
+            Ok(unauthorized_error(req).map_into_right_body())
         })
     }
 }
@@ -108,7 +124,7 @@ fn verify_user(auth: BasicAuth) -> bool {
 }
 
 fn unauthorized_error(req: ServiceRequest) -> ServiceResponse {
-    let http_res = HttpResponse::Unauthorized().finish();
+    let http_res = HttpResponse::Unauthorized().body("Invalid credentials");
     let (http_req, _) = req.into_parts();
     ServiceResponse::new(http_req, http_res)
 }
@@ -379,7 +395,10 @@ pub mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn middleware_correct_user_credentials_should_succeed_and_return_valid_token() {
+        let _lock = PasswordService::lock_for_test();
+
         let password = "some-password";
         setup_password_file(password);
 
@@ -391,14 +410,16 @@ pub mod tests {
             .insert_header(ContentType::plaintext())
             .insert_header(("Authorization", format!("Basic {encoded_password}")))
             .to_request();
-        println!("req: {req:#?}");
         let resp = test::call_service(&app, req).await;
 
         assert!(resp.status().is_success());
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn middleware_invalid_user_credentials_should_return_unauthorized_error() {
+        let _lock = PasswordService::lock_for_test();
+
         let password = "some-password";
         setup_password_file(password);
 
@@ -413,6 +434,22 @@ pub mod tests {
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn middleware_correct_bearer_token_should_succeed() {
+        let claim = generate_valid_claim();
+        let token = generate_token(claim);
+
+        let app = create_service().await;
+
+        let req = test::TestRequest::default()
+            .insert_header(ContentType::plaintext())
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert!(resp.status().is_success());
     }
 
     #[tokio::test]
