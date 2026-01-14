@@ -42,6 +42,21 @@ pub use crate::http_helpers::{
 /// Macro for unauthenticated POST requests with standard error handling.
 /// Requires domain parameters for event wrapping.
 ///
+/// # Patterns
+///
+/// Pattern 0: Simple POST without body (status only)
+/// ```ignore
+/// unauth_post!(Device, DeviceEvent, model, "/ack-rollback", AckRollbackResponse, "Acknowledge rollback")
+/// ```
+///
+/// Pattern 1: POST with JSON body expecting JSON response
+/// ```ignore
+/// unauth_post!(Auth, AuthEvent, model, "/endpoint", Response, "Action",
+///     body_json: &request,
+///     expect_json: ResponseType
+/// )
+/// ```
+///
 /// Pattern 2: POST with JSON body expecting status only
 /// ```ignore
 /// unauth_post!(Auth, AuthEvent, model, "/set-password", SetPasswordResponse, "Set password",
@@ -58,6 +73,23 @@ pub use crate::http_helpers::{
 /// ```
 #[macro_export]
 macro_rules! unauth_post {
+    // Pattern 0: Simple POST without body (status only)
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr) => {{
+        $model.start_loading();
+        let cmd = crux_core::Command::all([
+            crux_core::render::render(),
+            $crate::HttpCmd::post($crate::build_url($endpoint))
+                .build()
+                .then_send(|result| {
+                    let event_result = $crate::process_status_response($action, result);
+                    $crate::events::Event::$domain(
+                        $crate::events::$domain_event::$response_event(event_result),
+                    )
+                }),
+        ]);
+        cmd
+    }};
+
     // Pattern 1: POST with JSON body expecting JSON response
     ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_json: $body:expr, expect_json: $response_type:ty) => {{
         $model.start_loading();

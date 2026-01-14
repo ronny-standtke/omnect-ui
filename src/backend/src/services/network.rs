@@ -253,8 +253,15 @@ impl NetworkConfigService {
 
     /// Clear the rollback occurred marker (called when UI acknowledges it)
     pub fn clear_rollback_occurred() {
-        let _ = fs::remove_file(network_rollback_occurred_file!());
-        info!("rollback occurred marker cleared");
+        let marker_file = network_rollback_occurred_file!();
+        info!("Attempting to clear rollback occurred marker at: {marker_file:?}");
+        match fs::remove_file(marker_file) {
+            Ok(()) => info!("Successfully removed rollback occurred marker file"),
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                info!("Rollback occurred marker file does not exist (already cleared)")
+            }
+            Err(e) => error!("Failed to remove rollback occurred marker file: {e}"),
+        }
     }
 
     /// Mark that a rollback has occurred (sets marker file)

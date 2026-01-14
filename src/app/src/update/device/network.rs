@@ -4,6 +4,7 @@ use crate::auth_post;
 use crate::events::{DeviceEvent, Event, UiEvent};
 use crate::http_get_silent;
 use crate::model::Model;
+use crate::unauth_post;
 use crate::types::{
     HealthcheckInfo, NetworkChangeState, NetworkConfigRequest, NetworkFormData, NetworkFormState,
     OverlaySpinnerState,
@@ -299,7 +300,9 @@ pub fn handle_ack_rollback(model: &mut Model) -> Command<Effect, Event> {
     }
 
     // Send POST request to backend to clear the marker file
-    auth_post!(
+    // Note: Using unauth_post instead of auth_post because this may be called before login
+    // (the rollback notification appears in App.vue onMounted, before authentication)
+    unauth_post!(
         Device,
         DeviceEvent,
         model,
