@@ -174,13 +174,10 @@ Run `./build-and-deploy-image.sh --help` for all available options.
 ### Testing
 
 ```bash
-# Run backend tests
+# Run all tests (backend + core)
 cargo test --features mock
 
-# Run Crux Core tests
-cargo test -p omnect-ui-core
-
-# Lint
+# Lint all code
 cargo clippy --all-targets --features mock
 ```
 

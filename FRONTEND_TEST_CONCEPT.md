@@ -6,12 +6,12 @@ Leverage the Crux architecture's testability by design. The Core contains all bu
 
 **Approach:** Test the Core exhaustively (cheap, fast, deterministic), keep E2E minimal for regression safety.
 
-**Phase 1 Status:** ⏳ **In Progress**
+**Phase 1 Status:** ✅ **Complete**
 
 - PR #77: Authentication Tests (17 tests) - ✅ Complete
 - PR #78: Device Tests - ✅ Complete
-- PR #79: Network Tests - ✅ Complete (this branch)
-- PR #80: Reconnection Tests - 🔄 Pending
+- PR #79: Network Tests - ✅ Complete
+- PR #80: Reconnection Tests - ✅ Complete (this branch)
 
 ## Implementation Plan
 
@@ -40,13 +40,13 @@ Leverage the Crux architecture's testability by design. The Core contains all bu
 - [x] Test DHCP/static switching logic
 - [x] Test network form state management
 
-#### PR 1.4: Update/Reconnection Tests 🔄
+#### PR 1.4: Update/Reconnection Tests ✅
 
-- [ ] Test reconnection state machine for all operations (reboot, factory reset, update)
-- [ ] Test reconnection timeout handling with operation-specific durations
-- [ ] Test update completion detection based on validation status
-- [ ] Test healthcheck response handling during reconnection
-- [ ] Test network IP reachability detection
+- [x] Test reconnection state machine for all operations (reboot, factory reset, update)
+- [x] Test reconnection timeout handling with operation-specific durations
+- [x] Test update completion detection based on validation status
+- [x] Test healthcheck response handling during reconnection
+- [x] Test network IP reachability detection
 
 **Note:** Original PR 1.5 (WebSocket Tests) was merged into PR 1.2 as WebSocket event handling tests are naturally colocated with device state updates.
 
@@ -222,7 +222,7 @@ mod tests {
 
 | Phase | Speed | Stability | Coverage | Priority | Status |
 |:------|:------|:----------|:---------|:---------|:-------|
-| Core State Tests | Fast (ms) | Deterministic | High | **High** | ⏳ **In Progress (17/92 tests)** |
+| Core State Tests | Fast (ms) | Deterministic | High | **High** | ✅ **Complete** |
 | ~~Core Effect Tests~~ | ~~Fast (ms)~~ | ~~Deterministic~~ | ~~High~~ | **Skipped** | 🚫 **Not recommended** |
 | E2E Tests | Slow (s) | Flaky-prone | Low | Low | ⏳ **Planned (Phase 3)** |
 

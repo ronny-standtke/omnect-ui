@@ -311,7 +311,6 @@ pub fn handle_ack_rollback(model: &mut Model) -> Command<Effect, Event> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::events::{DeviceEvent, Event};
     use crate::model::Model;
     use crate::types::{
@@ -319,8 +318,8 @@ mod tests {
         NetworkFormData, NetworkFormState, NetworkStatus, SetNetworkConfigResponse,
         UpdateValidationStatus, VersionInfo,
     };
-    use crux_core::testing::AppTester;
     use crate::App;
+    use crux_core::testing::AppTester;
 
     fn create_test_network_adapter(name: &str, ip: &str, dhcp: bool) -> DeviceNetwork {
         DeviceNetwork {
@@ -373,7 +372,7 @@ mod tests {
             {
                 assert_eq!(adapter_name, "eth0");
                 assert_eq!(form_data.ip_address, "192.168.1.100");
-                assert_eq!(form_data.dhcp, false);
+                assert!(!form_data.dhcp);
                 assert_eq!(form_data, original_data);
             }
             assert!(!model.network_form_dirty);
