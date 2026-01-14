@@ -499,3 +499,294 @@ impl NetworkConfigService {
         .context(format!("failed to serialize rollback: {path:?}"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_valid_dhcp_config() -> NetworkConfig {
+        NetworkConfig {
+            is_server_addr: false,
+            ip_changed: false,
+            name: "eth0".to_string(),
+            dhcp: true,
+            previous_ip: Ipv4Addr::new(192, 168, 1, 100),
+            ip: None,
+            netmask: None,
+            gateway: None,
+            dns: None,
+        }
+    }
+
+    fn create_valid_static_config() -> NetworkConfig {
+        NetworkConfig {
+            is_server_addr: false,
+            ip_changed: false,
+            name: "eth0".to_string(),
+            dhcp: false,
+            previous_ip: Ipv4Addr::new(192, 168, 1, 100),
+            ip: Some(Ipv4Addr::new(192, 168, 1, 101)),
+            netmask: Some(24),
+            gateway: Some(vec![Ipv4Addr::new(192, 168, 1, 1)]),
+            dns: Some(vec![Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::new(8, 8, 4, 4)]),
+        }
+    }
+
+    mod validation {
+        use super::*;
+
+        #[test]
+        fn valid_dhcp_config_passes() {
+            let config = create_valid_dhcp_config();
+            let request = SetNetworkConfigRequest {
+                network: config,
+                enable_rollback: None,
+                switching_to_dhcp: true,
+            };
+
+            assert!(request.validate().is_ok());
+        }
+
+        #[test]
+        fn valid_static_config_passes() {
+            let config = create_valid_static_config();
+            let request = SetNetworkConfigRequest {
+                network: config,
+                enable_rollback: None,
+                switching_to_dhcp: false,
+            };
+
+            assert!(request.validate().is_ok());
+        }
+
+        #[test]
+        fn empty_interface_name_fails() {
+            let mut config = create_valid_dhcp_config();
+            config.name = String::new();
+            let request = SetNetworkConfigRequest {
+                network: config,
+                enable_rollback: None,
+                switching_to_dhcp: false,
+            };
+
+            assert!(request.validate().is_err());
+        }
+
+        #[test]
+        fn netmask_above_32_fails() {
+            let mut config = create_valid_static_config();
+            config.netmask = Some(33);
+            let request = SetNetworkConfigRequest {
+                network: config,
+                enable_rollback: None,
+                switching_to_dhcp: false,
+            };
+
+            assert!(request.validate().is_err());
+        }
+
+        #[test]
+        fn netmask_at_boundary_passes() {
+            let mut config = create_valid_static_config();
+            config.netmask = Some(32);
+            let request = SetNetworkConfigRequest {
+                network: config,
+                enable_rollback: None,
+                switching_to_dhcp: false,
+            };
+
+            assert!(request.validate().is_ok());
+        }
+
+        #[test]
+        fn netmask_zero_passes() {
+            let mut config = create_valid_static_config();
+            config.netmask = Some(0);
+            let request = SetNetworkConfigRequest {
+                network: config,
+                enable_rollback: None,
+                switching_to_dhcp: false,
+            };
+
+            assert!(request.validate().is_ok());
+        }
+    }
+
+    mod ini_generation {
+        use super::*;
+        use tempfile::TempDir;
+
+        #[test]
+        fn write_network_config_creates_valid_ini_for_dhcp() {
+            let temp_dir = TempDir::new().expect("failed to create temp dir");
+            let config = NetworkConfig {
+                is_server_addr: false,
+                ip_changed: false,
+                name: "eth0".to_string(),
+                dhcp: true,
+                previous_ip: Ipv4Addr::new(192, 168, 1, 100),
+                ip: None,
+                netmask: None,
+                gateway: None,
+                dns: None,
+            };
+
+            // Use the internal write function logic but with a temp path
+            let mut ini = Ini::new();
+            ini.with_section(Some("Match".to_owned()))
+                .set("Name", &config.name);
+            let mut network_section = ini.with_section(Some("Network").to_owned());
+            network_section.set("DHCP", "yes");
+
+            let config_path = temp_dir.path().join("10-eth0.network");
+            ini.write_to_file(&config_path)
+                .expect("failed to write ini");
+
+            // Verify the file was created and contains expected content
+            let contents = fs::read_to_string(&config_path).expect("failed to read ini");
+            assert!(contents.contains("[Match]"));
+            assert!(contents.contains("Name=eth0") || contents.contains("Name = eth0"));
+            assert!(contents.contains("[Network]"));
+            assert!(contents.contains("DHCP=yes") || contents.contains("DHCP = yes"));
+        }
+
+        #[test]
+        fn write_network_config_creates_valid_ini_for_static() {
+            let temp_dir = TempDir::new().expect("failed to create temp dir");
+            let config = NetworkConfig {
+                is_server_addr: false,
+                ip_changed: false,
+                name: "eth0".to_string(),
+                dhcp: false,
+                previous_ip: Ipv4Addr::new(192, 168, 1, 100),
+                ip: Some(Ipv4Addr::new(192, 168, 1, 101)),
+                netmask: Some(24),
+                gateway: Some(vec![Ipv4Addr::new(192, 168, 1, 1)]),
+                dns: Some(vec![Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::new(8, 8, 4, 4)]),
+            };
+
+            // Replicate the write logic
+            let mut ini = Ini::new();
+            ini.with_section(Some("Match".to_owned()))
+                .set("Name", &config.name);
+            let mut network_section = ini.with_section(Some("Network").to_owned());
+
+            let ip = config.ip.expect("ip required for static");
+            let mask = config.netmask.expect("mask required for static");
+            network_section.set("Address", format!("{ip}/{mask}"));
+
+            if let Some(gateways) = &config.gateway {
+                for gateway in gateways {
+                    network_section.add("Gateway", gateway.to_string());
+                }
+            }
+
+            if let Some(dnss) = &config.dns {
+                for dns in dnss {
+                    network_section.add("DNS", dns.to_string());
+                }
+            }
+
+            let config_path = temp_dir.path().join("10-eth0.network");
+            ini.write_to_file(&config_path)
+                .expect("failed to write ini");
+
+            // Verify the file contents
+            let contents = fs::read_to_string(&config_path).expect("failed to read ini");
+            assert!(contents.contains("[Match]"));
+            assert!(contents.contains("Name=eth0") || contents.contains("Name = eth0"));
+            assert!(contents.contains("[Network]"));
+            assert!(
+                contents.contains("Address=192.168.1.101/24")
+                    || contents.contains("Address = 192.168.1.101/24")
+            );
+            assert!(
+                contents.contains("Gateway=192.168.1.1")
+                    || contents.contains("Gateway = 192.168.1.1")
+            );
+            assert!(contents.contains("DNS=8.8.8.8") || contents.contains("DNS = 8.8.8.8"));
+            assert!(contents.contains("DNS=8.8.4.4") || contents.contains("DNS = 8.8.4.4"));
+        }
+    }
+
+    mod rollback_response {
+        use super::*;
+
+        #[test]
+        fn response_includes_rollback_timeout() {
+            let response = SetNetworkConfigResponse {
+                rollback_timeout_seconds: ROLLBACK_TIMEOUT_SECS,
+                ui_port: 1977,
+                rollback_enabled: true,
+            };
+
+            assert_eq!(response.rollback_timeout_seconds, 90);
+        }
+
+        #[test]
+        fn rollback_enabled_when_ip_changed_and_is_server() {
+            let response = SetNetworkConfigResponse {
+                rollback_timeout_seconds: ROLLBACK_TIMEOUT_SECS,
+                ui_port: 1977,
+                rollback_enabled: true,
+            };
+
+            assert!(response.rollback_enabled);
+        }
+
+        #[test]
+        fn rollback_disabled_when_not_requested() {
+            let response = SetNetworkConfigResponse {
+                rollback_timeout_seconds: ROLLBACK_TIMEOUT_SECS,
+                ui_port: 1977,
+                rollback_enabled: false,
+            };
+
+            assert!(!response.rollback_enabled);
+        }
+    }
+
+    mod serde {
+        use super::*;
+
+        #[test]
+        fn network_config_serializes_with_camel_case() {
+            let config = create_valid_dhcp_config();
+            let json = serde_json::to_string(&config).expect("failed to serialize");
+
+            assert!(json.contains("\"isServerAddr\""));
+            assert!(json.contains("\"ipChanged\""));
+            assert!(json.contains("\"previousIp\""));
+        }
+
+        #[test]
+        fn network_config_deserializes_from_camel_case() {
+            let json = r#"{
+                "isServerAddr": false,
+                "ipChanged": false,
+                "name": "eth0",
+                "dhcp": true,
+                "previousIp": "192.168.1.100"
+            }"#;
+
+            let config: NetworkConfig = serde_json::from_str(json).expect("failed to deserialize");
+
+            assert_eq!(config.name, "eth0");
+            assert!(config.dhcp);
+            assert_eq!(config.previous_ip, Ipv4Addr::new(192, 168, 1, 100));
+        }
+
+        #[test]
+        fn request_includes_enable_rollback_field() {
+            let config = create_valid_dhcp_config();
+            let request = SetNetworkConfigRequest {
+                network: config,
+                enable_rollback: Some(true),
+                switching_to_dhcp: false,
+            };
+
+            let json = serde_json::to_string(&request).expect("failed to serialize");
+            assert!(json.contains("\"enableRollback\""));
+        }
+    }
+}

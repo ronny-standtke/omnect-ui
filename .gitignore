@@ -17,5 +17,4 @@ src/ui/src/core/pkg/
 
 # Research and documentation files (generated, not part of source)
 *.md
-!FRONTEND_TEST_CONCEPT.md
 !README.md
