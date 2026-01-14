@@ -193,7 +193,7 @@ If you encounter permission errors when running E2E tests (typically after runni
 
 ```bash
 # Clean all E2E test artifacts with permission issues
-sudo rm -rf temp/certs src/ui/node_modules/.vite src/ui/test-results src/ui/playwright-report
+sudo rm -rf temp/certs src/ui/dist src/ui/test-results src/ui/playwright-report
 ```
 
 ### VSCode Integration

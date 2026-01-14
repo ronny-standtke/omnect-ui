@@ -15,7 +15,7 @@ import type { HealthcheckResponse } from "./types"
 axios.defaults.validateStatus = (_) => true
 
 const { snackbarState } = useSnackbar()
-const { viewModel, ackRollback } = useCore()
+const { viewModel, ackRollback, subscribeToChannels, unsubscribeFromChannels } = useCore()
 
 const { lgAndUp } = useDisplay()
 const router = useRouter()
@@ -55,10 +55,16 @@ const acknowledgeRollback = () => {
 watch(
 	() => viewModel.is_authenticated,
 	async (isAuthenticated) => {
-		if (!isAuthenticated && route.meta.requiresAuth) {
-			await router.push("/login")
+		if (isAuthenticated) {
+			subscribeToChannels()
+		} else {
+			unsubscribeFromChannels()
+			if (route.meta.requiresAuth) {
+				await router.push("/login")
+			}
 		}
-	}
+	},
+    { immediate: true }
 )
 
 onMounted(async () => {

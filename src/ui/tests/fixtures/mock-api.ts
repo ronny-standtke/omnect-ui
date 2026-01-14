@@ -1,4 +1,5 @@
 import { Page } from '@playwright/test';
+import jwt from 'jsonwebtoken';
 
 export async function mockConfig(page: Page) {
   const config = {
@@ -24,11 +25,12 @@ export async function mockConfig(page: Page) {
 }
 
 export async function mockLoginSuccess(page: Page) {
+  const token = jwt.sign({ sub: 'user123' }, 'secret', { expiresIn: '1h' });
   await page.route('**/token/login', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'text/plain',
-      body: 'mock_token_123',
+      body: token,
     });
   });
 }
@@ -44,18 +46,23 @@ export async function mockRequireSetPassword(page: Page) {
 }
 
 export async function mockNetworkConfig(page: Page) {
-  await page.route('**/api/v1/network/config', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        interfaces: [
-          {
-            name: 'eth0',
-            dhcp: true,
-          },
-        ],
-      }),
-    });
+  // Mock the network configuration endpoint
+  // Note: The Core sends POST to /network, not api/v1/...
+  await page.route('**/network', async (route) => {
+    if (route.request().method() === 'POST') {
+        // Mock successful application of network config
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                rollbackTimeoutSeconds: 90,
+                uiPort: 5173,
+                rollbackEnabled: true
+            }),
+        });
+    } else {
+        // Fallback for other methods if any
+        await route.continue();
+    }
   });
 }

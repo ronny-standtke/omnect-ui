@@ -20,4 +20,4 @@ docker run --rm \
     -w /workspace \
     --net=host \
     $IMAGE \
-    /bin/bash -c "./scripts/run-e2e-tests.sh"
+    ./scripts/run-e2e-tests.sh "$@"
