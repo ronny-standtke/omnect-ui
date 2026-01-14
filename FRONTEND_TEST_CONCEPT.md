@@ -9,8 +9,8 @@ Leverage the Crux architecture's testability by design. The Core contains all bu
 **Phase 1 Status:** ⏳ **In Progress**
 
 - PR #77: Authentication Tests (17 tests) - ✅ Complete
-- PR #78: Device Tests - ✅ Complete (this branch)
-- PR #79: Network Tests - 🔄 Pending
+- PR #78: Device Tests - ✅ Complete
+- PR #79: Network Tests - ✅ Complete (this branch)
 - PR #80: Reconnection Tests - 🔄 Pending
 
 ## Implementation Plan
@@ -33,12 +33,12 @@ Leverage the Crux architecture's testability by design. The Core contains all bu
 - [x] Test reboot flows
 - [x] Test firmware upload state transitions
 
-#### PR 1.3: Network Tests 🔄
+#### PR 1.3: Network Tests ✅
 
-- [ ] Test network configuration updates
-- [ ] Test IP change detection and rollback state
-- [ ] Test DHCP/static switching logic
-- [ ] Test network form state management
+- [x] Test network configuration updates
+- [x] Test IP change detection and rollback state
+- [x] Test DHCP/static switching logic
+- [x] Test network form state management
 
 #### PR 1.4: Update/Reconnection Tests 🔄
 
