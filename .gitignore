@@ -5,15 +5,17 @@ tools/centrifugo
 *.tar.gz
 *.env
 *.http
-/dist
 .claude/
 .gemini/
 .pnpm-store/
+
+# Build outputs (root level only)
+/dist
 
 # Generated WASM package (rebuild with wasm-pack)
 src/ui/src/core/pkg/
 
 # Research and documentation files (generated, not part of source)
 *.md
-!README.md
 !FRONTEND_TEST_CONCEPT.md
+!README.md

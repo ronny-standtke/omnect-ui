@@ -11,7 +11,12 @@ Leverage the Crux architecture's testability by design. The Core contains all bu
 - PR #77: Authentication Tests (17 tests) - ✅ Complete
 - PR #78: Device Tests - ✅ Complete
 - PR #79: Network Tests - ✅ Complete
-- PR #80: Reconnection Tests - ✅ Complete (this branch)
+- PR #80: Reconnection Tests - ✅ Complete
+
+**Phase 3 Status:** ⏳ **In Progress**
+
+- PR #81: E2E Infrastructure - ✅ Complete (this branch)
+- PR #82: Critical Path Tests - 🔄 Pending
 
 ## Implementation Plan
 
@@ -83,10 +88,10 @@ After implementing Phase 1, we've determined that effect emission testing provid
 
 *Goal: Guard critical user journeys against regression. Keep minimal.*
 
-#### PR 3.1: E2E Infrastructure
-- [ ] Set up Playwright with minimal config
-- [ ] Create test fixtures for mock backend responses
-- [ ] Document local test execution
+#### PR 3.1: E2E Infrastructure ✅
+- [x] Set up Playwright with minimal config
+- [x] Create test fixtures for mock backend responses
+- [x] Document local test execution
 
 #### PR 3.2: Critical Path Tests
 - [ ] Test: Login → View device info → Logout
