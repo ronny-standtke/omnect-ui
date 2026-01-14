@@ -6,10 +6,10 @@ Leverage the Crux architecture's testability by design. The Core contains all bu
 
 **Approach:** Test the Core exhaustively (cheap, fast, deterministic), keep E2E minimal for regression safety.
 
-**Phase 1 Status:** ⏳ **In Progress** (17 tests in this branch)
+**Phase 1 Status:** ⏳ **In Progress**
 
-- PR #77: Authentication Tests (17 tests) - ✅ Complete (this branch)
-- PR #78: Device Tests - 🔄 Pending
+- PR #77: Authentication Tests (17 tests) - ✅ Complete
+- PR #78: Device Tests - ✅ Complete (this branch)
 - PR #79: Network Tests - 🔄 Pending
 - PR #80: Reconnection Tests - 🔄 Pending
 
@@ -25,13 +25,13 @@ Leverage the Crux architecture's testability by design. The Core contains all bu
 - [x] Test token management state
 - [x] Test password change flow
 
-#### PR 1.2: Device Tests 🔄
+#### PR 1.2: Device Tests ✅
 
-- [ ] Test system info updates (WebSocket events)
-- [ ] Test online status transitions
-- [ ] Test factory reset state machine
-- [ ] Test reboot flows
-- [ ] Test firmware upload state transitions
+- [x] Test system info updates (WebSocket events)
+- [x] Test online status transitions
+- [x] Test factory reset state machine
+- [x] Test reboot flows
+- [x] Test firmware upload state transitions
 
 #### PR 1.3: Network Tests 🔄
 
