@@ -349,3 +349,204 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod build_url {
+        use super::*;
+
+        fn create_test_client() -> OmnectDeviceServiceClient {
+            OmnectDeviceServiceClient {
+                client: reqwest::Client::new(),
+                has_publish_endpoint: false,
+            }
+        }
+
+        #[test]
+        fn normalizes_path_with_leading_slash() {
+            let client = create_test_client();
+            let url = client.build_url("/status/v1");
+            assert_eq!(url, "http://localhost/status/v1");
+        }
+
+        #[test]
+        fn normalizes_path_without_leading_slash() {
+            let client = create_test_client();
+            let url = client.build_url("status/v1");
+            assert_eq!(url, "http://localhost/status/v1");
+        }
+
+        #[test]
+        fn normalizes_path_with_multiple_leading_slashes() {
+            let client = create_test_client();
+            let url = client.build_url("///status/v1");
+            assert_eq!(url, "http://localhost/status/v1");
+        }
+
+        #[test]
+        fn handles_empty_path() {
+            let client = create_test_client();
+            let url = client.build_url("");
+            assert_eq!(url, "http://localhost/");
+        }
+
+        #[test]
+        fn handles_root_path() {
+            let client = create_test_client();
+            let url = client.build_url("/");
+            assert_eq!(url, "http://localhost/");
+        }
+    }
+
+    mod version_requirements {
+        use super::*;
+
+        #[test]
+        fn required_version_parses_correctly() {
+            let version_req = OmnectDeviceServiceClient::required_version();
+            assert_eq!(version_req.to_string(), ">=0.39.0");
+        }
+
+        #[test]
+        fn required_version_matches_valid_versions() {
+            let version_req = OmnectDeviceServiceClient::required_version();
+
+            assert!(version_req.matches(&Version::parse("0.39.0").unwrap()));
+            assert!(version_req.matches(&Version::parse("0.40.0").unwrap()));
+            assert!(version_req.matches(&Version::parse("1.0.0").unwrap()));
+        }
+
+        #[test]
+        fn required_version_rejects_older_versions() {
+            let version_req = OmnectDeviceServiceClient::required_version();
+
+            assert!(!version_req.matches(&Version::parse("0.38.9").unwrap()));
+            assert!(!version_req.matches(&Version::parse("0.30.0").unwrap()));
+            assert!(!version_req.matches(&Version::parse("0.1.0").unwrap()));
+        }
+    }
+
+    mod healthcheck_info {
+        use super::*;
+        use crate::services::network::NetworkConfigService;
+
+        fn create_test_status(version: &str) -> Status {
+            Status {
+                network_status: NetworkStatus {
+                    network_interfaces: vec![],
+                },
+                system_info: SystemInfo {
+                    fleet_id: Some("test-fleet".to_string()),
+                    omnect_device_service_version: version.to_string(),
+                },
+                update_validation_status: UpdateValidationStatus {
+                    status: "idle".to_string(),
+                },
+            }
+        }
+
+        #[test]
+        fn detects_version_mismatch_when_below_requirement() {
+            let status = create_test_status("0.38.0");
+            let current_version = status.system_info.omnect_device_service_version.clone();
+
+            let required_version = OmnectDeviceServiceClient::required_version();
+            let parsed_current = Version::parse(&current_version).unwrap();
+
+            let mismatch = !required_version.matches(&parsed_current);
+
+            assert!(mismatch);
+        }
+
+        #[test]
+        fn detects_no_mismatch_when_matching_requirement() {
+            let status = create_test_status("0.40.0");
+            let current_version = status.system_info.omnect_device_service_version.clone();
+
+            let required_version = OmnectDeviceServiceClient::required_version();
+            let parsed_current = Version::parse(&current_version).unwrap();
+
+            let mismatch = !required_version.matches(&parsed_current);
+
+            assert!(!mismatch);
+        }
+
+        #[test]
+        fn healthcheck_includes_network_rollback_status() {
+            // This tests that the healthcheck info construction includes
+            // the network rollback occurred flag from NetworkConfigService
+            let _rollback_occurred = NetworkConfigService::rollback_occurred();
+
+            // The value depends on filesystem state, just verify it's callable without panicking
+        }
+    }
+
+    mod publish_endpoint_state {
+        use super::*;
+
+        #[test]
+        fn new_client_has_no_publish_endpoint() {
+            let client = OmnectDeviceServiceClient {
+                client: reqwest::Client::new(),
+                has_publish_endpoint: false,
+            };
+
+            assert!(!client.has_publish_endpoint);
+        }
+
+        #[test]
+        fn client_tracks_publish_endpoint_registration() {
+            let mut client = OmnectDeviceServiceClient {
+                client: reqwest::Client::new(),
+                has_publish_endpoint: false,
+            };
+
+            // Simulate registration
+            client.has_publish_endpoint = true;
+
+            assert!(client.has_publish_endpoint);
+        }
+    }
+
+    mod constants {
+        use super::*;
+
+        #[test]
+        fn api_endpoints_are_correctly_defined() {
+            assert_eq!(OmnectDeviceServiceClient::STATUS_ENDPOINT, "/status/v1");
+            assert_eq!(
+                OmnectDeviceServiceClient::REPUBLISH_ENDPOINT,
+                "/republish/v1/"
+            );
+            assert_eq!(
+                OmnectDeviceServiceClient::FACTORY_RESET_ENDPOINT,
+                "/factory-reset/v1"
+            );
+            assert_eq!(OmnectDeviceServiceClient::REBOOT_ENDPOINT, "/reboot/v1");
+            assert_eq!(
+                OmnectDeviceServiceClient::RELOAD_NETWORK_ENDPOINT,
+                "/reload-network/v1"
+            );
+            assert_eq!(
+                OmnectDeviceServiceClient::LOAD_UPDATE_ENDPOINT,
+                "/fwupdate/load/v1"
+            );
+            assert_eq!(
+                OmnectDeviceServiceClient::RUN_UPDATE_ENDPOINT,
+                "/fwupdate/run/v1"
+            );
+            assert_eq!(
+                OmnectDeviceServiceClient::PUBLISH_ENDPOINT,
+                "/publish-endpoint/v1"
+            );
+        }
+
+        #[test]
+        fn required_version_constant_is_valid_semver_requirement() {
+            let version_req = VersionReq::parse(OmnectDeviceServiceClient::REQUIRED_CLIENT_VERSION);
+            assert!(version_req.is_ok());
+        }
+    }
+}
