@@ -22,8 +22,20 @@ const gateways = ref(props.networkAdapter?.ipv4?.gateways?.join("\n") || "")
 const addressAssignment = ref(props.networkAdapter?.ipv4?.addrs[0]?.dhcp ? "dhcp" : "static")
 const netmask = ref(props.networkAdapter?.ipv4?.addrs[0]?.prefix_len || 24)
 
+// State flags - declared early since they're used in watchers and initialization
+const isSubmitting = ref(false)
+const isSyncingFromWebSocket = ref(false)
+const isStartingFreshEdit = ref(false)
+
 // Initialize form editing state in Core when component mounts
+// Set flag to prevent the dirty flag watch from resetting form during initialization
+isStartingFreshEdit.value = true
 networkFormStartEdit(props.networkAdapter.name)
+nextTick(() => {
+    nextTick(() => {
+        isStartingFreshEdit.value = false
+    })
+})
 
 // Helper to reset form fields to match current adapter data
 const resetFormFields = () => {
@@ -57,7 +69,19 @@ watch([ipAddress, dns, gateways, addressAssignment, netmask], () => {
 }, { flush: 'post' })
 
 // Watch for form reset from Core (when dirty flag clears for this adapter)
+// This should ONLY reset the form when the user explicitly clicks "Reset",
+// NOT when starting a fresh edit or after completing a submit
 watch(() => viewModel.network_form_dirty, (isDirty, wasDirty) => {
+    // Skip reset if we're starting a fresh edit (the form is being initialized)
+    if (isStartingFreshEdit.value) {
+        return
+    }
+
+    // Skip reset during submit - the dirty flag clears during submit, not because user reset
+    if (isSubmitting.value) {
+        return
+    }
+
     const isEditingThisAdapter = viewModel.network_form_state?.type === 'editing' &&
                                   (viewModel.network_form_state as any).adapter_name === props.networkAdapter.name
 
@@ -97,8 +121,6 @@ watch(() => props.networkAdapter, (newAdapter) => {
 }, { deep: true })
 
 const isDHCP = computed(() => addressAssignment.value === "dhcp")
-const isSubmitting = ref(false)
-const isSyncingFromWebSocket = ref(false)
 const isServerAddr = computed(() => props.networkAdapter?.ipv4?.addrs[0]?.addr === location.hostname)
 const ipChanged = computed(() => props.networkAdapter?.ipv4?.addrs[0]?.addr !== ipAddress.value)
 const dhcpChanged = computed(() => props.networkAdapter?.ipv4?.addrs[0]?.dhcp !== isDHCP.value)
@@ -216,7 +238,7 @@ const cancelRollbackModal = () => {
                             <div>
                                 <strong>Enable automatic rollback (recommended)</strong>
                                 <div class="text-caption text-medium-emphasis">
-                                    If you can't reach the new IP within 90 seconds, the device will automatically
+                                    If you can't reach the new IP and log in within 90 seconds, the device will automatically
                                     restore the previous configuration.
                                 </div>
                             </div>

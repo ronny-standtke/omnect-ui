@@ -90,14 +90,14 @@ fn update_network_state_and_spinner(
         if rollback_enabled {
             "Network configuration is being applied. Your connection will be interrupted. \
              Use your DHCP server or device console to find the new IP address. \
-             You must access the new address to cancel the automatic rollback."
+             You must access the new address and log in to cancel the automatic rollback."
         } else {
             "Network configuration has been applied. Your connection will be interrupted. \
              Use your DHCP server or device console to find the new IP address."
         }
     } else if rollback_enabled {
         "Network configuration is being applied. Click the button below to open the new address in a new tab. \
-         You must access the new address to cancel the automatic rollback."
+         You must access the new address and log in to cancel the automatic rollback."
     } else {
         "Network configuration has been applied. Your connection will be interrupted. \
          Click the button below to navigate to the new address."
