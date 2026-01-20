@@ -3,9 +3,16 @@
 
 set -e
 
+# Navigate to repository root (parent of scripts directory)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
 CENTRIFUGO_VERSION="${CENTRIFUGO_VERSION:-v6.1.0}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="tools"
 CENTRIFUGO_BIN="$SCRIPT_DIR/centrifugo"
+
+# Create directory if it doesn't exist
+mkdir -p "$SCRIPT_DIR"
 
 if [[ -f "$CENTRIFUGO_BIN" ]]; then
   echo "Centrifugo already exists at $CENTRIFUGO_BIN"

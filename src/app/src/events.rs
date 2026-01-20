@@ -101,6 +101,7 @@ pub enum WebSocketEvent {
 pub enum UiEvent {
     ClearError,
     ClearSuccess,
+    SetBrowserHostname(String),
 }
 
 /// Main event enum - wraps domain events

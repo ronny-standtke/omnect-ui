@@ -18,9 +18,10 @@ export type {
 	HealthcheckInfo,
 	Event,
 	Effect,
-	Model as CoreViewModel,
+	CoreViewModel,
 	UpdateManifest,
 	NetworkFormData,
+	NetworkConfigRequest,
 } from '../../../../shared_types/generated/typescript/types/shared_types'
 
 // Import types and variant classes for conversions
@@ -33,6 +34,7 @@ import {
 	DeviceOperationStateVariantwaiting_reconnection,
 	DeviceOperationStateVariantreconnection_failed,
 	DeviceOperationStateVariantreconnection_successful,
+	UpdateManifest,
 	NetworkChangeState,
 	NetworkChangeStateVariantidle,
 	NetworkChangeStateVariantapplying_config,
@@ -122,11 +124,6 @@ export type FactoryResetStatusString = 'unknown' | 'mode_supported' | 'mode_unsu
 // ViewModel Interface
 // ============================================================================
 
-export interface UpdateManifest {
-	update_id: { provider: string; name: string; version: string }
-	compatibility: Array<{ device_manufacturer: string; device_model: string }>
-}
-
 export interface ViewModel {
 	system_info: {
 		os: { name: string; version: string }
@@ -185,6 +182,19 @@ export interface ViewModel {
 
 	// Network form dirty flag (tracks unsaved changes)
 	network_form_dirty: boolean
+
+	// Browser hostname (from window.location.hostname) - used for network connection detection
+	browser_hostname: string | null
+
+	// Current connection adapter name (computed in Core from browser_hostname + network_status)
+	current_connection_adapter: string | null
+
+	// Device offline tracking
+	device_went_offline: boolean
+
+	// Network rollback modal state (computed in Core)
+	should_show_rollback_modal: boolean
+	default_rollback_enabled: boolean
 
 	// Firmware upload state
 	firmware_upload_state: UploadStateType

@@ -5,6 +5,7 @@ import { useCore } from "../../composables/useCore"
 import { useClipboard } from "../../composables/useClipboard"
 import { useIPValidation } from "../../composables/useIPValidation"
 import type { DeviceNetwork } from "../../types"
+import type { NetworkConfigRequest } from "../../composables/useCore"
 
 const { showError } = useSnackbar()
 const { viewModel, setNetworkConfig, networkFormReset, networkFormUpdate, networkFormStartEdit } = useCore()
@@ -121,15 +122,21 @@ watch(() => props.networkAdapter, (newAdapter) => {
 }, { deep: true })
 
 const isDHCP = computed(() => addressAssignment.value === "dhcp")
-const isServerAddr = computed(() => props.networkAdapter?.ipv4?.addrs[0]?.addr === location.hostname)
-const ipChanged = computed(() => props.networkAdapter?.ipv4?.addrs[0]?.addr !== ipAddress.value)
-const dhcpChanged = computed(() => props.networkAdapter?.ipv4?.addrs[0]?.dhcp !== isDHCP.value)
-const switchingToDhcp = computed(() => !props.networkAdapter?.ipv4?.addrs[0]?.dhcp && isDHCP.value)
 
-// Modal state for rollback confirmation
-const showRollbackModal = ref(false)
-const enableRollback = ref(true) // Default to checked (enabled)
-const isDhcpChange = ref(false) // Track if this is a DHCP change
+// Use Core's computed rollback modal flags
+const isRollbackRequired = computed(() => viewModel.should_show_rollback_modal)
+const enableRollback = ref(true) // Tracks user's checkbox state
+const confirmationModalOpen = ref(false)
+
+// Watch Core's default_rollback_enabled to update checkbox when modal shows
+watch(() => viewModel.should_show_rollback_modal, (shouldShow) => {
+    if (shouldShow) {
+        enableRollback.value = viewModel.default_rollback_enabled
+    }
+})
+
+// Determine if switching to DHCP for UI text (Core computes this, but we still need it for modal text)
+const switchingToDhcp = computed(() => !props.networkAdapter?.ipv4?.addrs[0]?.dhcp && isDHCP.value)
 
 const restoreSettings = () => {
     // Reset Core state (clears dirty flag and NetworkFormState)
@@ -162,55 +169,61 @@ watch(
 	(newMessage) => {
 		if (newMessage) {
 			isSubmitting.value = false
+            confirmationModalOpen.value = false
+		}
+	}
+)
+
+// Watch for form state changes from Core as a reliable way to reset submitting state
+watch(
+	() => viewModel.network_form_state,
+	(newState) => {
+		// If we were submitting and the state is no longer submitting, reset our flag
+		if (isSubmitting.value && newState?.type !== 'submitting') {
+			isSubmitting.value = false
 		}
 	}
 )
 
 const submit = async () => {
-    // Check if we need to show the rollback confirmation modal
-    // Show modal when:
-    // 1. Static IP changed on current adapter, OR
-    // 2. Switching to DHCP on current adapter (IP will likely change)
-    if (isServerAddr.value && (ipChanged.value || switchingToDhcp.value)) {
-        isDhcpChange.value = switchingToDhcp.value
-        showRollbackModal.value = true
-        return
+    // Check if the change requires rollback protection
+    if (isRollbackRequired.value) {
+        confirmationModalOpen.value = true
+    } else {
+        await submitNetworkConfig(false)
     }
-
-    // If not changing server IP, submit directly without rollback
-    await submitNetworkConfig(false)
 }
 
 const submitNetworkConfig = async (includeRollback: boolean) => {
     isSubmitting.value = true
-    showRollbackModal.value = false
+    confirmationModalOpen.value = false
 
-    const config = JSON.stringify({
-        isServerAddr: isServerAddr.value,
-        ipChanged: ipChanged.value,
+    const config: NetworkConfigRequest = {
+        isServerAddr: props.isCurrentConnection,
+        ipChanged: props.networkAdapter.ipv4?.addrs[0]?.addr !== ipAddress.value,
         name: props.networkAdapter.name,
         dhcp: isDHCP.value,
-        ip: ipAddress.value ?? null,
-        previousIp: props.networkAdapter.ipv4?.addrs[0]?.addr,
-        netmask: netmask.value ?? null,
-        gateway: gateways.value.split("\n").filter(g => g.trim()) ?? [],
-        dns: dns.value.split("\n").filter(d => d.trim()) ?? [],
+        ip: ipAddress.value || null,
+        previousIp: props.networkAdapter.ipv4?.addrs[0]?.addr || null,
+        netmask: netmask.value || null,
+        gateway: gateways.value.split("\n").filter(g => g.trim()) || [],
+        dns: dns.value.split("\n").filter(d => d.trim()) || [],
         enableRollback: includeRollback ? enableRollback.value : null,
         switchingToDhcp: switchingToDhcp.value
-    })
+    }
 
-    await setNetworkConfig(config)
+    await setNetworkConfig(JSON.stringify(config))
 }
 
 const cancelRollbackModal = () => {
-    showRollbackModal.value = false
+    confirmationModalOpen.value = false
 }
 </script>
 
 <template>
     <div>
         <!-- Rollback Confirmation Modal -->
-        <v-dialog v-model="showRollbackModal" max-width="600">
+        <v-dialog v-model="confirmationModalOpen" max-width="600">
             <v-card>
                 <v-card-title class="text-h5">
                     Confirm Network Configuration Change
@@ -220,7 +233,7 @@ const cancelRollbackModal = () => {
                         This change will disconnect your current session.
                     </v-alert>
                     <p class="mb-4">
-                        <template v-if="isDhcpChange">
+                        <template v-if="switchingToDhcp">
                             You are about to switch to DHCP on the network adapter you're currently connected to.
                             This will likely assign a new IP address and interrupt your connection.
                         </template>
@@ -229,21 +242,23 @@ const cancelRollbackModal = () => {
                             This will interrupt your connection.
                         </template>
                     </p>
-                    <v-checkbox
-                        v-model="enableRollback"
-                        label="Enable automatic rollback (recommended)"
-                        hide-details
-                    >
-                        <template #label>
-                            <div>
-                                <strong>Enable automatic rollback (recommended)</strong>
-                                <div class="text-caption text-medium-emphasis">
-                                    If you can't reach the new IP and log in within 90 seconds, the device will automatically
-                                    restore the previous configuration.
-                                </div>
-                            </div>
-                        </template>
-                    </v-checkbox>
+          <v-checkbox
+            v-model="enableRollback"
+            :label="switchingToDhcp ? 'Enable automatic rollback' : 'Enable automatic rollback (recommended)'"
+            hide-details
+          >
+            <template v-slot:label>
+              <strong>{{ switchingToDhcp ? 'Enable automatic rollback' : 'Enable automatic rollback (recommended)' }}</strong>
+            </template>
+          </v-checkbox>
+          <div class="text-caption text-medium-emphasis ml-8">
+            <template v-if="switchingToDhcp">
+              Not recommended for DHCP: You won't know the new IP address, making it difficult to confirm the change before the 90 second timeout triggers a rollback.
+            </template>
+            <template v-else>
+              If you can't reach the new IP and log in within 90 seconds, the device will automatically restore the previous configuration.
+            </template>
+          </div>
                 </v-card-text>
                 <v-card-actions>
                     <v-spacer></v-spacer>

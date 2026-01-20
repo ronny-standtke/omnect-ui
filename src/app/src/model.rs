@@ -52,6 +52,16 @@ pub struct Model {
     // Network form dirty flag (tracks unsaved changes)
     pub network_form_dirty: bool,
 
+    // Browser hostname (from window.location.hostname) - used for network connection detection
+    pub browser_hostname: Option<String>,
+
+    // Current connection adapter name (computed from browser_hostname + network_status)
+    pub current_connection_adapter: Option<String>,
+
+    // Network rollback modal state
+    pub should_show_rollback_modal: bool,
+    pub default_rollback_enabled: bool,
+
     // Firmware upload state
     pub firmware_upload_state: UploadState,
 
@@ -99,6 +109,23 @@ impl Model {
     /// Clear the error message without affecting the loading state.
     pub fn clear_error(&mut self) {
         self.error_message = None;
+    }
+
+    /// Update current connection adapter based on browser_hostname and network_status
+    pub fn update_current_connection_adapter(&mut self) {
+        self.current_connection_adapter = self
+            .network_status
+            .as_ref()
+            .and_then(|status| status.current_connection_adapter(self.browser_hostname.as_deref()))
+            .map(|adapter| adapter.name.clone());
+    }
+
+    /// Check if the given adapter name matches the current connection adapter
+    pub fn is_current_adapter(&self, name: &str) -> bool {
+        self.current_connection_adapter
+            .as_ref()
+            .map(|current| current == name)
+            .unwrap_or(false)
     }
 }
 

@@ -29,7 +29,7 @@ export function useMessageWatchers(options?: {
   onSuccess?: (message: string) => void
   onError?: (message: string) => void
 }): void {
-  const { viewModel } = useCore()
+  const { viewModel, clearSuccess, clearError } = useCore()
   const { showSuccess, showError } = useSnackbar()
 
   // Watch for success messages
@@ -39,6 +39,8 @@ export function useMessageWatchers(options?: {
       if (newMessage) {
         showSuccess(newMessage)
         options?.onSuccess?.(newMessage)
+        // Clear the message in Core so subsequent identical messages trigger the watcher again
+        clearSuccess()
       }
     }
   )
@@ -50,6 +52,8 @@ export function useMessageWatchers(options?: {
       if (newMessage) {
         showError(newMessage)
         options?.onError?.(newMessage)
+        // Clear the error in Core
+        clearError()
       }
     }
   )

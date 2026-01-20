@@ -33,8 +33,10 @@ pub fn init_wasm() {
 /// Takes a bincode-serialized Event and returns bincode-serialized Effects.
 #[wasm_bindgen]
 pub fn process_event(event_bytes: &[u8]) -> Vec<u8> {
-    CORE.process_event(event_bytes)
-        .expect("Failed to process event")
+    let mut effects = Vec::new();
+    CORE.update(event_bytes, &mut effects)
+        .expect("Failed to process event");
+    effects
 }
 
 /// Get the current view model
@@ -42,7 +44,9 @@ pub fn process_event(event_bytes: &[u8]) -> Vec<u8> {
 /// Returns a bincode-serialized ViewModel.
 #[wasm_bindgen]
 pub fn view() -> Vec<u8> {
-    CORE.view().expect("Failed to get view model")
+    let mut view = Vec::new();
+    CORE.view(&mut view).expect("Failed to get view model");
+    view
 }
 
 /// Handle a response to an effect
@@ -51,6 +55,12 @@ pub fn view() -> Vec<u8> {
 /// Returns bincode-serialized Effects that should be processed.
 #[wasm_bindgen]
 pub fn handle_response(id: u32, response_bytes: &[u8]) -> Vec<u8> {
-    CORE.handle_response(id, response_bytes)
-        .expect("Failed to handle response")
+    let mut effects = Vec::new();
+    CORE.resolve(
+        crux_core::bridge::EffectId(id),
+        response_bytes,
+        &mut effects,
+    )
+    .expect("Failed to handle response");
+    effects
 }

@@ -1,11 +1,11 @@
-import { Page } from '@playwright/test';
+import { Page, expect } from '@playwright/test';
 import { publishToCentrifugo } from './centrifugo';
 
 /**
  * Polling interval used by the application for healthcheck requests.
  * This must match NEW_IP_POLL_INTERVAL_MS in src/ui/src/composables/core/timers.ts
  */
-export const HEALTHCHECK_POLL_INTERVAL_MS = 5000;
+export const HEALTHCHECK_POLL_INTERVAL_MS = Number(process.env.VITE_NEW_IP_POLL_INTERVAL_MS) || 5000;
 
 /**
  * Default rollback timeout in seconds if not specified
@@ -223,11 +223,7 @@ export class NetworkTestHarness {
           }),
         });
       } else {
-        await route.fulfill({
-          status: 503,
-          contentType: 'application/json',
-          body: JSON.stringify({ error: 'Device unreachable - connection timed out' }),
-        });
+        await route.abort();
       }
     });
   }
@@ -425,6 +421,96 @@ export class NetworkTestHarness {
    */
   getHealthcheckCallCount(): number {
     return this.healthcheckCallCount;
+  }
+
+  /**
+   * Navigate to the Network section in the UI.
+   *
+   * @param page - Playwright page instance
+   */
+  async navigateToNetwork(page: Page): Promise<void> {
+    // Ensure no blocking overlays are visible
+    const overlay = page.locator('.v-overlay--active');
+    if (await overlay.count() > 0) {
+        await expect(overlay).not.toBeVisible({ timeout: 10000 });
+    }
+
+    const networkLink = page.getByText('Network', { exact: true });
+    await expect(networkLink).toBeVisible({ timeout: 10000 });
+    
+    // Use dispatchEvent to bypass potential occlusion issues
+    await networkLink.dispatchEvent('click');
+    
+    // Wait for the Network header to be visible to confirm navigation
+    await expect(page.locator('.text-h4', { hasText: 'Network' })).toBeVisible({ timeout: 10000 });
+  }
+
+  /**
+   * Navigate to a specific network adapter tab.
+   *
+   * @param page - Playwright page instance
+   * @param adapterName - Name of the adapter to select
+   */
+  async navigateToAdapter(page: Page, adapterName: string): Promise<void> {
+    const tab = page.getByRole('tab', { name: adapterName }).or(page.locator('.v-tab').filter({ hasText: new RegExp(`^${adapterName}$`) }));
+    
+    try {
+      await expect(tab).toBeVisible({ timeout: 10000 });
+    } catch (e) {
+      console.error(`[Harness] Tab ${adapterName} NOT VISIBLE. Current URL: ${page.url()}`);
+      // Log some info about available tabs
+      const tabs = await page.locator('.v-tab').allTextContents();
+      console.log(`[Harness] Available tabs: ${tabs.join(', ')}`);
+      throw e;
+    }
+
+    await tab.click();
+    // Wait for form to load (IP input visible)
+    await expect(page.getByRole('textbox', { name: /IP Address/i }).first()).toBeVisible({ timeout: 10000 });
+  }
+
+  /**
+   * Combined helper to setup one or more adapters and navigate to one.
+   *
+   * @param page - Playwright page instance
+   * @param configs - Single adapter config or array of configs
+   * @param targetAdapter - Which adapter to navigate to (defaults to the first one)
+   * @param options - Additional options (e.g., skipNavigation)
+   */
+  async setup(
+    page: Page,
+    configs: (Partial<DeviceNetwork> & { name?: string }) | Array<Partial<DeviceNetwork> & { name?: string }>,
+    targetAdapter?: string,
+    options: { skipNavigation?: boolean } = {}
+  ): Promise<void> {
+    const configArray = Array.isArray(configs) ? configs : [configs];
+    const adapters = configArray.map((c, i) =>
+      this.createAdapter(c.name || (i === 0 ? 'eth0' : `eth${i}`), c)
+    );
+
+    // Give UI a moment to be ready for WebSocket updates
+    await page.waitForTimeout(100);
+    await this.publishNetworkStatus(adapters);
+
+    if (options.skipNavigation) {
+      return;
+    }
+
+    await this.navigateToNetwork(page);
+    await this.navigateToAdapter(page, targetAdapter || adapters[0].name);
+  }
+
+  /**
+   * Helper to click Save and verify the operation completes successfully.
+   *
+   * @param page - Playwright page instance
+   * @param timeout - Timeout for the operation to complete (default: 10000)
+   */
+  async saveAndVerify(page: Page, timeout: number = 10000): Promise<void> {
+    const saveButton = page.getByRole('button', { name: /save/i });
+    await saveButton.click();
+    await expect(saveButton).toBeEnabled({ timeout });
+    await expect(page.getByText('Network configuration updated')).toBeVisible();
   }
 
   /**

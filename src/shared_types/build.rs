@@ -3,7 +3,8 @@ use crux_core::typegen::TypeGen;
 use omnect_ui_core::{
     events::{AuthEvent, DeviceEvent, UiEvent, WebSocketEvent},
     types::{
-        DeviceOperationState, FactoryResetStatus, NetworkChangeState, NetworkFormState, UploadState,
+        DeviceOperationState, FactoryResetStatus, NetworkChangeState, NetworkConfigRequest,
+        NetworkFormData, NetworkFormState, UploadState,
     },
     App,
 };
@@ -22,12 +23,14 @@ fn main() -> Result<()> {
     gen.register_type::<WebSocketEvent>()?;
     gen.register_type::<UiEvent>()?;
 
-    // Explicitly register other enums to ensure all variants are traced
+    // Explicitly register other enums/structs to ensure all variants are traced
     gen.register_type::<FactoryResetStatus>()?;
     gen.register_type::<DeviceOperationState>()?;
     gen.register_type::<NetworkChangeState>()?;
     gen.register_type::<NetworkFormState>()?;
     gen.register_type::<UploadState>()?;
+    gen.register_type::<NetworkConfigRequest>()?;
+    gen.register_type::<NetworkFormData>()?;
 
     let output_root = PathBuf::from("./generated");
 

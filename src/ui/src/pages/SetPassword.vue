@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { watch } from "vue"
 import OmnectLogo from "../components/branding/OmnectLogo.vue"
 import PasswordField from "../components/common/PasswordField.vue"
 import { useCore } from "../composables/useCore"
@@ -7,17 +8,23 @@ import { useMessageWatchers } from "../composables/useMessageWatchers"
 import { usePasswordForm } from "../composables/usePasswordForm"
 import { useAuthNavigation } from "../composables/useAuthNavigation"
 
-const { setPassword, login } = useCore()
+const { setPassword, login, viewModel } = useCore()
 const { password, repeatPassword, errorMsg, validatePasswords } = usePasswordForm()
 
 useCoreInitialization()
 useAuthNavigation()
 
+// Watch for successful password set to trigger auto-login
+watch(
+	() => viewModel.requires_password_set,
+	async (requiresPasswordSet) => {
+		if (requiresPasswordSet === false && password.value) {
+			await login(password.value)
+		}
+	}
+)
+
 useMessageWatchers({
-	onSuccess: async () => {
-		// Automatically log in with the new password
-		await login(password.value)
-	},
 	onError: (message) => {
 		errorMsg.value = message
 	}

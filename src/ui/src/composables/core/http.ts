@@ -68,20 +68,9 @@ export async function executeHttpRequest(
 
 		const response = await fetch(url, fetchOptions)
 
-		// Workaround: crux_http (0.15) appears to discard the response body for 4xx/5xx errors
-		// and returns a generic error. To preserve the body (which contains validation messages),
-		// we map error statuses to 200 OK and pass the original status in a header.
-		// The Core macro will detect this header and treat it as an error.
-		let status = response.status
-		const responseHeadersMap = new Headers(response.headers)
-		if (status >= 400) {
-			console.log(`[HTTP Effect ${requestId}] Masking status ${status} as 200 to preserve body`)
-			responseHeadersMap.append('x-original-status', status.toString())
-			status = 200
-		}
-
 		// Convert response headers
 		const responseHeaders: Array<CoreHttpHeader> = []
+		const responseHeadersMap = new Headers(response.headers)
 		responseHeadersMap.forEach((value, name) => {
 			responseHeaders.push(new CoreHttpHeader(name, value))
 		})
@@ -92,7 +81,7 @@ export async function executeHttpRequest(
 		console.log(`[HTTP Effect ${requestId}] Response body: ${bodyBytes.length} bytes`)
 
 		// Create HttpResponse
-		const httpResponse = new CoreHttpResponse(status, responseHeaders, bodyBytes)
+		const httpResponse = new CoreHttpResponse(response.status, responseHeaders, bodyBytes)
 
 		// Create success result
 		const result = new HttpResultVariantOk(httpResponse)

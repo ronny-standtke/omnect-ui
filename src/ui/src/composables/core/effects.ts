@@ -8,8 +8,8 @@
  */
 
 import { wasmModule } from './state'
-import { executeHttpRequest, setEffectsProcessor } from './http'
-import { executeCentrifugoOperation } from './centrifugo'
+import { executeHttpRequest, setEffectsProcessor as setHttpEffectsProcessor } from './http'
+import { executeCentrifugoOperation, setEffectsProcessor as setCentrifugoEffectsProcessor } from './centrifugo'
 import {
 	Request as CruxRequest,
 	EffectVariantRender,
@@ -75,7 +75,7 @@ export async function processEffects(effectsBytes: Uint8Array): Promise<void> {
 			console.log(`Centrifugo operation:`, centrifugoOperation)
 
 			// Execute the operation asynchronously
-			executeCentrifugoOperation(centrifugoOperation).catch((error) => {
+			executeCentrifugoOperation(request.id, centrifugoOperation).catch((error) => {
 				console.error('Failed to execute Centrifugo operation:', error)
 			})
 		} else {
@@ -84,5 +84,6 @@ export async function processEffects(effectsBytes: Uint8Array): Promise<void> {
 	}
 }
 
-// Wire up the circular dependency: http.ts needs to call processEffects
-setEffectsProcessor(processEffects)
+// Wire up the circular dependency: http.ts and centrifugo.ts need to call processEffects
+setHttpEffectsProcessor(processEffects)
+setCentrifugoEffectsProcessor(processEffects)

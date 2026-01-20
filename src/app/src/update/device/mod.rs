@@ -14,15 +14,17 @@ pub use reconnection::{
 
 use crux_core::Command;
 
-use crate::auth_post;
-use crate::events::{DeviceEvent, Event};
-use crate::handle_response;
-use crate::model::Model;
-use crate::types::{
-    DeviceOperationState, FactoryResetRequest, LoadUpdateRequest, OverlaySpinnerState,
-    RunUpdateRequest, UpdateManifest, UploadState,
+use crate::{
+    auth_post,
+    events::{DeviceEvent, Event},
+    handle_response,
+    model::Model,
+    types::{
+        DeviceOperationState, FactoryResetRequest, LoadUpdateRequest, OverlaySpinnerState,
+        RunUpdateRequest, UpdateManifest, UploadState,
+    },
+    Effect,
 };
-use crate::Effect;
 
 /// Handle device action events (reboot, factory reset, network, updates)
 pub fn handle(event: DeviceEvent, model: &mut Model) -> Command<Effect, Event> {
@@ -190,26 +192,21 @@ pub fn handle(event: DeviceEvent, model: &mut Model) -> Command<Effect, Event> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{DeviceEvent, Event};
+    use crate::events::DeviceEvent;
     use crate::types::{DeviceOperationState, UploadState};
-    use crate::{App, UpdateManifest};
-    use crux_core::testing::AppTester;
+    use crate::UpdateManifest;
 
     mod reboot {
         use super::*;
 
         #[test]
         fn success_sets_rebooting_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::RebootResponse(Ok(()))),
-                &mut model,
-            );
+            let _ = handle(DeviceEvent::RebootResponse(Ok(())), &mut model);
 
             assert!(!model.is_loading);
             assert_eq!(
@@ -222,14 +219,13 @@ mod tests {
 
         #[test]
         fn network_error_sets_rebooting_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::RebootResponse(Err("Failed to fetch".into()))),
+            let _ = handle(
+                DeviceEvent::RebootResponse(Err("Failed to fetch".into())),
                 &mut model,
             );
 
@@ -246,14 +242,13 @@ mod tests {
 
         #[test]
         fn non_network_error_sets_error() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::RebootResponse(Err("Permission denied".into()))),
+            let _ = handle(
+                DeviceEvent::RebootResponse(Err("Permission denied".into())),
                 &mut model,
             );
 
@@ -269,14 +264,13 @@ mod tests {
 
         #[test]
         fn invalid_mode_sets_error() {
-            let app = AppTester::<App>::default();
             let mut model = Model::default();
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::FactoryResetRequest {
+            let _ = handle(
+                DeviceEvent::FactoryResetRequest {
                     mode: "invalid".into(),
                     preserve: vec![],
-                }),
+                },
                 &mut model,
             );
 
@@ -291,16 +285,12 @@ mod tests {
 
         #[test]
         fn success_sets_factory_resetting_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::FactoryResetResponse(Ok(()))),
-                &mut model,
-            );
+            let _ = handle(DeviceEvent::FactoryResetResponse(Ok(())), &mut model);
 
             assert!(!model.is_loading);
             assert_eq!(
@@ -316,16 +306,15 @@ mod tests {
 
         #[test]
         fn network_error_sets_factory_resetting_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::FactoryResetResponse(Err(
-                    "NetworkError when attempting to fetch".into(),
-                ))),
+            let _ = handle(
+                DeviceEvent::FactoryResetResponse(Err(
+                    "NetworkError when attempting to fetch".into()
+                )),
                 &mut model,
             );
 
@@ -346,10 +335,9 @@ mod tests {
 
         #[test]
         fn upload_started_sets_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model::default();
 
-            let _ = app.update(Event::Device(DeviceEvent::UploadStarted), &mut model);
+            let _ = handle(DeviceEvent::UploadStarted, &mut model);
 
             assert_eq!(model.firmware_upload_state, UploadState::Uploading);
             assert!(model.overlay_spinner.is_visible());
@@ -357,28 +345,26 @@ mod tests {
 
         #[test]
         fn upload_progress_updates_spinner() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 firmware_upload_state: UploadState::Uploading,
                 overlay_spinner: OverlaySpinnerState::new("Uploading...").with_progress(0),
                 ..Default::default()
             };
 
-            let _ = app.update(Event::Device(DeviceEvent::UploadProgress(50)), &mut model);
+            let _ = handle(DeviceEvent::UploadProgress(50), &mut model);
 
             assert_eq!(model.firmware_upload_state, UploadState::Uploading);
         }
 
         #[test]
         fn upload_completed_sets_success() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 firmware_upload_state: UploadState::Uploading,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::UploadCompleted("/tmp/file.swu".into())),
+            let _ = handle(
+                DeviceEvent::UploadCompleted("/tmp/file.swu".into()),
                 &mut model,
             );
 
@@ -389,14 +375,13 @@ mod tests {
 
         #[test]
         fn upload_failed_sets_error() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 firmware_upload_state: UploadState::Uploading,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::UploadFailed("Network timeout".into())),
+            let _ = handle(
+                DeviceEvent::UploadFailed("Network timeout".into()),
                 &mut model,
             );
 
@@ -419,7 +404,6 @@ mod tests {
 
         #[test]
         fn success_stores_manifest() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
@@ -437,8 +421,8 @@ mod tests {
                 manifest_version: "1".into(),
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::LoadUpdateResponse(Ok(manifest.clone()))),
+            let _ = handle(
+                DeviceEvent::LoadUpdateResponse(Ok(manifest.clone())),
                 &mut model,
             );
 
@@ -449,16 +433,13 @@ mod tests {
 
         #[test]
         fn failure_sets_error() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::LoadUpdateResponse(
-                    Err("File not found".into()),
-                )),
+            let _ = handle(
+                DeviceEvent::LoadUpdateResponse(Err("File not found".into())),
                 &mut model,
             );
 
@@ -473,16 +454,12 @@ mod tests {
 
         #[test]
         fn success_sets_updating_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::RunUpdateResponse(Ok(()))),
-                &mut model,
-            );
+            let _ = handle(DeviceEvent::RunUpdateResponse(Ok(())), &mut model);
 
             assert!(!model.is_loading);
             assert_eq!(model.device_operation_state, DeviceOperationState::Updating);
@@ -492,14 +469,13 @@ mod tests {
 
         #[test]
         fn network_error_sets_updating_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Device(DeviceEvent::RunUpdateResponse(Err("IO error".into()))),
+            let _ = handle(
+                DeviceEvent::RunUpdateResponse(Err("IO error".into())),
                 &mut model,
             );
 

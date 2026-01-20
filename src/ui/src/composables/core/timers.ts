@@ -32,10 +32,10 @@ export function setEventSender(callback: (event: Event) => Promise<void>): void 
 // Timer Constants
 // ============================================================================
 
-const RECONNECTION_POLL_INTERVAL_MS = 5000 // 5 seconds
-const REBOOT_TIMEOUT_MS = 300000 // 5 minutes
-const FACTORY_RESET_TIMEOUT_MS = 600000 // 10 minutes
-const NEW_IP_POLL_INTERVAL_MS = 5000 // 5 seconds
+const RECONNECTION_POLL_INTERVAL_MS = Number(import.meta.env.VITE_RECONNECTION_POLL_INTERVAL_MS) || 5000 // 5 seconds
+const REBOOT_TIMEOUT_MS = Number(import.meta.env.VITE_REBOOT_TIMEOUT_MS) || 300000 // 5 minutes
+const FACTORY_RESET_TIMEOUT_MS = Number(import.meta.env.VITE_FACTORY_RESET_TIMEOUT_MS) || 600000 // 10 minutes
+const NEW_IP_POLL_INTERVAL_MS = Number(import.meta.env.VITE_NEW_IP_POLL_INTERVAL_MS) || 5000 // 5 seconds
 
 // ============================================================================
 // Timer IDs
@@ -189,6 +189,11 @@ export function startNewIpPolling(): void {
 
 	console.log('[useCore] Starting new IP polling')
 
+	// Clear messages when starting polling so that arriving at new IP/re-login 
+	// doesn't have stale success/error state
+	viewModel.success_message = null
+	viewModel.error_message = null
+
 	// Get timeout from viewModel (provided by backend)
 	const state = viewModel.network_change_state
 	if (!state || (state.type !== 'waiting_for_new_ip' && state.type !== 'waiting_for_old_ip')) {
@@ -239,6 +244,13 @@ export function startNewIpPolling(): void {
 
 	// Only start countdown and timeout if rollback is enabled (timeout > 0)
 	if (rollbackTimeout > 0) {
+		// Update countdown immediately
+		if (countdownDeadline !== null) {
+			const remainingMs = Math.max(0, countdownDeadline - Date.now())
+			const remainingSeconds = Math.ceil(remainingMs / 1000)
+			viewModel.overlay_spinner.countdown_seconds = remainingSeconds
+		}
+
 		// Start countdown interval (every 1 second for UI countdown)
 		// Calculate remaining seconds from deadline instead of decrementing
 		newIpCountdownIntervalId = setInterval(() => {
@@ -344,6 +356,9 @@ export function initializeTimerWatchers(): void {
 			// Navigate to new IP when it's reachable
 			if (newState?.type === 'new_ip_reachable') {
 				console.log(`[useCore] Redirecting to new IP: ${newState.new_ip}:${newState.ui_port}`)
+				// Clear messages before redirecting so they don't persist on arrival at new IP
+				viewModel.success_message = null
+				viewModel.error_message = null
 				// Use HTTPS (server only listens on HTTPS)
 				window.location.href = `https://${newState.new_ip}:${newState.ui_port}`
 			}

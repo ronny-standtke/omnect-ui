@@ -45,6 +45,50 @@ export async function mockRequireSetPassword(page: Page) {
   });
 }
 
+export async function mockSetPasswordSuccess(page: Page) {
+  await page.route('**/set-password', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({}),
+    });
+  });
+}
+
+export async function mockUpdatePasswordSuccess(page: Page) {
+  await page.route('**/update-password', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({}),
+    });
+  });
+}
+
+export async function mockPortalAuth(page: Page) {
+  const user = {
+    id_token: 'mock-id-token',
+    session_state: 'mock-session-state',
+    access_token: 'mock-access-token',
+    refresh_token: 'mock-refresh-token',
+    token_type: 'Bearer',
+    scope: 'openid profile email',
+    profile: {
+      sub: 'mock-user-id',
+      email: 'user@example.com',
+      preferred_username: 'user',
+      name: 'Mock User',
+    },
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  };
+
+  const key = 'oidc.user:http://localhost:8080:omnect-ui';
+  
+  await page.addInitScript(({ key, user }) => {
+    window.localStorage.setItem(key, JSON.stringify(user));
+  }, { key, user });
+}
+
 export async function mockNetworkConfig(page: Page) {
   // Mock the network configuration endpoint
   // Note: The Core sends POST to /network, not api/v1/...

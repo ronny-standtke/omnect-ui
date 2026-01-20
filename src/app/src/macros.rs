@@ -166,7 +166,7 @@ macro_rules! unauth_post {
 /// Returns string body (e.g., auth token) on success, with optional conversion to target type.
 ///
 /// NOTE: Endpoints are prefixed with `http://omnect-device` as a workaround.
-/// `crux_http` (v0.15) panics when given a relative URL in some environments (e.g. `cargo test`).
+/// `crux_http` panics when given a relative URL in some environments (e.g. `cargo test`).
 /// The UI shell (`useCore.ts`) strips this prefix before sending the request.
 ///
 /// # Example
@@ -203,7 +203,7 @@ macro_rules! auth_post_basic {
 /// Reduces boilerplate for POST requests that require authentication.
 ///
 /// NOTE: Endpoints are prefixed with `http://omnect-device` as a workaround.
-/// `crux_http` (v0.15) panics when given a relative URL in some environments (e.g. `cargo test`).
+/// `crux_http` panics when given a relative URL in some environments (e.g. `cargo test`).
 /// The UI shell (`useCore.ts`) strips this prefix before sending the request.
 /// This workaround should be removed once `crux_http` supports relative URLs gracefully.
 ///

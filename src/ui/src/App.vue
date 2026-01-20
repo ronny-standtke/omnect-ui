@@ -71,6 +71,16 @@ watch(
     { immediate: true }
 )
 
+// Watch for network rollback status from healthcheck updates (e.g. after automatic rollback)
+watch(
+	() => viewModel.healthcheck?.network_rollback_occurred,
+	(occurred) => {
+		if (occurred) {
+			showRollbackNotification.value = true
+		}
+	}
+)
+
 onMounted(async () => {
 	const res = await fetch("healthcheck", {
 		headers: {

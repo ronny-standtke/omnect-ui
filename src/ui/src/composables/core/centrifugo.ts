@@ -37,17 +37,31 @@ import {
 	Timeouts,
 	Duration,
 	CentrifugoOperationVariantSubscribeAll,
+	CentrifugoOutputVariantConnected,
+	CentrifugoOutputVariantDisconnected,
+	CentrifugoOutputVariantError,
 	type Event,
 } from '../../../../shared_types/generated/typescript/types/shared_types'
+import { BincodeSerializer } from '../../../../shared_types/generated/typescript/bincode/mod'
 
 // Event sender callback - set by index.ts to avoid circular dependency
 let sendEventCallback: ((event: Event) => Promise<void>) | null = null
+
+// Effects processor callback - set by effects.ts to avoid circular dependency
+let processEffectsCallback: ((effectsBytes: Uint8Array) => Promise<void>) | null = null
 
 /**
  * Set the event sender callback (called from index.ts after initialization)
  */
 export function setEventSender(callback: (event: Event) => Promise<void>): void {
 	sendEventCallback = callback
+}
+
+/**
+ * Set the effects processor callback (called from effects.ts)
+ */
+export function setEffectsProcessor(callback: (effectsBytes: Uint8Array) => Promise<void>): void {
+	processEffectsCallback = callback
 }
 
 /**
@@ -149,7 +163,7 @@ async function parseAndSendChannelEvent(channel: string, jsonData: string): Prom
 }
 
 /**
- * Execute Centrifugo SubscribeAll operation
+ * Execute Centrifugo operation
  *
  * Subscribes to all Centrifugo channels and forwards messages as events to Core.
  * Uses the event-based architecture where WebSocket data is parsed and sent as
@@ -158,7 +172,18 @@ async function parseAndSendChannelEvent(channel: string, jsonData: string): Prom
  * Note: Only SubscribeAll is implemented - individual channel operations removed.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function executeCentrifugoOperation(operation: any): Promise<void> {
+export async function executeCentrifugoOperation(requestId: number, operation: any): Promise<void> {
+	const sendResponse = async (output: any) => {
+		if (!wasmModule) return
+		const serializer = new BincodeSerializer()
+		output.serialize(serializer)
+		const responseBytes = serializer.getBytes()
+		const newEffectsBytes = wasmModule.handle_response(requestId, responseBytes) as Uint8Array
+		if (newEffectsBytes.length > 0 && processEffectsCallback) {
+			await processEffectsCallback(newEffectsBytes)
+		}
+	}
+
 	if (operation instanceof CentrifugoOperationVariantSubscribeAll) {
 		const channels = Object.values(CentrifugeSubscriptionType)
 		centrifugoInstance.initializeCentrifuge()
@@ -168,22 +193,28 @@ export async function executeCentrifugoOperation(operation: any): Promise<void> 
 			if (subscriptionsStarted) return
 			subscriptionsStarted = true
 
-			for (const channel of channels) {
-				await centrifugoInstance.subscribe((data: unknown) => {
-					const jsonData = JSON.stringify(data)
-					parseAndSendChannelEvent(channel, jsonData)
-				}, channel)
+			try {
+				for (const channel of channels) {
+					await centrifugoInstance.subscribe((data: unknown) => {
+						const jsonData = JSON.stringify(data)
+						parseAndSendChannelEvent(channel, jsonData)
+					}, channel)
 
-				await centrifugoInstance.history((data: unknown) => {
-					try {
-						if (data) {
-							const jsonData = JSON.stringify(data)
-							parseAndSendChannelEvent(channel, jsonData)
+					await centrifugoInstance.history((data: unknown) => {
+						try {
+							if (data) {
+								const jsonData = JSON.stringify(data)
+								parseAndSendChannelEvent(channel, jsonData)
+							}
+						} catch (error) {
+							console.error(`[Centrifugo] Error processing history for ${channel}:`, error)
 						}
-					} catch (error) {
-						console.error(`[Centrifugo] Error processing history for ${channel}:`, error)
-					}
-				}, channel)
+					}, channel)
+				}
+				await sendResponse(new CentrifugoOutputVariantConnected())
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				await sendResponse(new CentrifugoOutputVariantError(errorMessage))
 			}
 		}
 
@@ -191,7 +222,11 @@ export async function executeCentrifugoOperation(operation: any): Promise<void> 
 			performSubscriptions()
 		})
 		performSubscriptions()
+	} else if (operation instanceof CentrifugoOperationVariantUnsubscribeAll) {
+		centrifugoInstance.disconnect()
+		await sendResponse(new CentrifugoOutputVariantDisconnected())
 	} else {
-		console.error(`[Centrifugo] Unsupported operation - only SubscribeAll is implemented`)
+		console.error(`[Centrifugo] Unsupported operation`)
+		await sendResponse(new CentrifugoOutputVariantError('Unsupported operation'))
 	}
 }

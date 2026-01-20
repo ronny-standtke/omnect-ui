@@ -72,6 +72,7 @@ import {
 	WebSocketEventVariantUnsubscribeFromChannels,
 	UiEventVariantClearError,
 	UiEventVariantClearSuccess,
+	UiEventVariantSetBrowserHostname,
 } from '../../../../shared_types/generated/typescript/types/shared_types'
 
 // Re-export types for external use
@@ -95,6 +96,7 @@ export type {
 	CoreViewModel,
 	UpdateManifest,
 	NetworkFormData,
+	NetworkConfigRequest,
 } from './types'
 
 // ============================================================================
@@ -186,6 +188,16 @@ async function initializeCore(): Promise<void> {
 
 			// Send initial event
 			await sendEventToCore(new EventVariantInitialize())
+
+			// Send browser hostname for network connection detection
+			const hostname = window.location.hostname
+			await sendEventToCore(new EventVariantUi(new UiEventVariantSetBrowserHostname(hostname)))
+
+			// Expose for E2E tests to spoof hostname
+			;(window as any).setBrowserHostname = (h: string) => {
+				console.log(`[useCore] Spoofing browser hostname: ${h}`)
+				return sendEventToCore(new EventVariantUi(new UiEventVariantSetBrowserHostname(h)))
+			}
 		} catch (error) {
 			console.error('Failed to load Crux Core WASM module:', error)
 			console.log('Running in fallback mode without WASM')

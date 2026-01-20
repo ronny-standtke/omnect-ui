@@ -3,7 +3,11 @@ set -e
 
 # Host script to run E2E tests inside the docker container
 
-IMAGE="omnectshareddevacr.azurecr.io/rust:bookworm"
+# Navigate to repository root (parent of scripts directory)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+IMAGE="omnectweucopsacr.azurecr.io/rust:bookworm"
 
 echo "🐳 Launching test container..."
 
@@ -14,9 +18,9 @@ if [ ! -d "src/ui/dist" ]; then
 fi
 
 # Run the test script inside the container
-# We mount the current directory to /workspace
+# We mount the repository root to /workspace
 docker run --rm \
-    -v $(pwd):/workspace \
+    -v "$REPO_ROOT":/workspace \
     -w /workspace \
     --net=host \
     $IMAGE \

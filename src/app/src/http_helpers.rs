@@ -2,19 +2,12 @@
 //!
 //! This module extracts common HTTP response handling logic from macros
 //! into debuggable, testable functions.
-//!
-//! ## Shell Workaround
-//!
-//! The shell uses an `x-original-status` header to preserve error status codes.
-//! This is needed because `crux_http` (v0.15) discards response bodies for 4xx/5xx
-//! status codes. The shell masks these as 200 OK and passes the original status
-//! in this header, allowing the Core to properly extract error messages.
 
 use crux_http::Response;
 
 /// Base URL for omnect-device API endpoints.
 ///
-/// NOTE: This URL is prefixed as a workaround because `crux_http` (v0.15) panics
+/// NOTE: This URL is prefixed as a workaround because `crux_http` (v0.16.0-rc2) panics
 /// when given a relative URL in some environments (e.g. `cargo test`).
 /// The UI shell (`useCore.ts`) strips this prefix before sending the request.
 pub const BASE_URL: &str = "http://omnect-device";
@@ -37,25 +30,16 @@ pub fn build_url(endpoint: &str) -> String {
     format!("{BASE_URL}{endpoint}")
 }
 
-/// Validates HTTP response, accounting for shell workaround.
+/// Validates HTTP response.
 ///
-/// Returns `true` if the response status is 2xx AND there is no
-/// `x-original-status` header indicating a masked error.
+/// Returns `true` if the response status is 2xx.
 pub fn is_response_success(response: &Response<Vec<u8>>) -> bool {
-    let is_hack_error = response.header("x-original-status").is_some();
-    response.status().is_success() && !is_hack_error
+    response.status().is_success()
 }
 
 /// Extracts error message from HTTP response.
-///
-/// Checks for shell hack header first, then falls back to body content.
 pub fn extract_error_message(action: &str, response: &mut Response<Vec<u8>>) -> String {
-    // Check for original status header from shell hack
-    let status = if let Some(original) = response.header("x-original-status") {
-        original.as_str().to_string()
-    } else {
-        response.status().to_string()
-    };
+    let status = response.status().to_string();
 
     match response.take_body() {
         Some(body) => {

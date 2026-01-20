@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { mockConfig, mockLoginSuccess, mockRequireSetPassword } from './fixtures/mock-api';
 import { publishToCentrifugo } from './fixtures/centrifugo';
+import { setupAndLogin } from './fixtures/test-setup';
 
 test.describe('Device Info', () => {
   test.beforeEach(async ({ page }) => {
@@ -8,18 +8,7 @@ test.describe('Device Info', () => {
     page.on('console', msg => console.log(`BROWSER LOG: ${msg.text()}`));
     page.on('pageerror', err => console.log(`BROWSER ERROR: ${err}`));
 
-    await mockConfig(page);
-    await mockLoginSuccess(page);
-    await mockRequireSetPassword(page);
-    await page.goto('/');
-    
-    // Perform login
-    await page.getByPlaceholder(/enter your password/i).fill('password');
-    await page.getByRole('button', { name: /log in/i }).click();
-    
-    // Wait for dashboard or successful login state
-    // We can wait for the side menu or a specific dashboard element
-    await expect(page.getByText('Common Info')).toBeVisible();
+    await setupAndLogin(page);
   });
 
   test('displays system info from Centrifugo', async ({ page }) => {

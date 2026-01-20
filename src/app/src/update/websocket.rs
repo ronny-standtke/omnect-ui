@@ -1,9 +1,10 @@
 use crux_core::Command;
 
-use crate::events::{Event, WebSocketEvent};
-use crate::model::Model;
-use crate::update_field;
-use crate::{CentrifugoCmd, Effect};
+use crate::{
+    events::{Event, WebSocketEvent},
+    model::Model,
+    update_field, CentrifugoCmd, Effect,
+};
 
 /// Handle WebSocket and Centrifugo-related events
 pub fn handle(event: WebSocketEvent, model: &mut Model) -> Command<Effect, Event> {
@@ -24,7 +25,9 @@ pub fn handle(event: WebSocketEvent, model: &mut Model) -> Command<Effect, Event
 
         WebSocketEvent::SystemInfoUpdated(info) => update_field!(model.system_info, Some(info)),
         WebSocketEvent::NetworkStatusUpdated(status) => {
-            update_field!(model.network_status, Some(status))
+            model.network_status = Some(status);
+            model.update_current_connection_adapter();
+            crux_core::render::render()
         }
         WebSocketEvent::OnlineStatusUpdated(status) => {
             update_field!(model.online_status, Some(status))
@@ -45,15 +48,13 @@ pub fn handle(event: WebSocketEvent, model: &mut Model) -> Command<Effect, Event
 mod tests {
     use super::*;
     use crate::types::{FactoryReset, OsInfo, SystemInfo, Timeouts, UpdateValidationStatus};
-    use crate::{App, OnlineStatus};
-    use crux_core::testing::AppTester;
+    use crate::OnlineStatus;
 
     mod system_info {
         use super::*;
 
         #[test]
         fn updates_system_info() {
-            let app = AppTester::<App>::default();
             let mut model = Model::default();
 
             let info = SystemInfo {
@@ -66,17 +67,13 @@ mod tests {
                 boot_time: Some("2024-01-01".into()),
             };
 
-            let _ = app.update(
-                Event::WebSocket(WebSocketEvent::SystemInfoUpdated(info.clone())),
-                &mut model,
-            );
+            let _ = handle(WebSocketEvent::SystemInfoUpdated(info.clone()), &mut model);
 
             assert_eq!(model.system_info, Some(info));
         }
 
         #[test]
         fn replaces_previous_system_info() {
-            let app = AppTester::<App>::default();
             let old_info = SystemInfo {
                 os: OsInfo {
                     name: "Linux".into(),
@@ -101,8 +98,8 @@ mod tests {
                 boot_time: Some("2024-01-01".into()),
             };
 
-            let _ = app.update(
-                Event::WebSocket(WebSocketEvent::SystemInfoUpdated(new_info.clone())),
+            let _ = handle(
+                WebSocketEvent::SystemInfoUpdated(new_info.clone()),
                 &mut model,
             );
 
@@ -115,13 +112,10 @@ mod tests {
 
         #[test]
         fn updates_online_status_to_online() {
-            let app = AppTester::<App>::default();
             let mut model = Model::default();
 
-            let _ = app.update(
-                Event::WebSocket(WebSocketEvent::OnlineStatusUpdated(OnlineStatus {
-                    iothub: true,
-                })),
+            let _ = handle(
+                WebSocketEvent::OnlineStatusUpdated(OnlineStatus { iothub: true }),
                 &mut model,
             );
 
@@ -130,16 +124,13 @@ mod tests {
 
         #[test]
         fn updates_online_status_to_offline() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 online_status: Some(OnlineStatus { iothub: true }),
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::WebSocket(WebSocketEvent::OnlineStatusUpdated(OnlineStatus {
-                    iothub: false,
-                })),
+            let _ = handle(
+                WebSocketEvent::OnlineStatusUpdated(OnlineStatus { iothub: false }),
                 &mut model,
             );
 
@@ -148,16 +139,13 @@ mod tests {
 
         #[test]
         fn transitions_from_offline_to_online() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 online_status: Some(OnlineStatus { iothub: false }),
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::WebSocket(WebSocketEvent::OnlineStatusUpdated(OnlineStatus {
-                    iothub: true,
-                })),
+            let _ = handle(
+                WebSocketEvent::OnlineStatusUpdated(OnlineStatus { iothub: true }),
                 &mut model,
             );
 
@@ -170,7 +158,6 @@ mod tests {
 
         #[test]
         fn updates_factory_reset_status() {
-            let app = AppTester::<App>::default();
             let mut model = Model::default();
 
             let status = FactoryReset {
@@ -178,8 +165,8 @@ mod tests {
                 result: None,
             };
 
-            let _ = app.update(
-                Event::WebSocket(WebSocketEvent::FactoryResetUpdated(status.clone())),
+            let _ = handle(
+                WebSocketEvent::FactoryResetUpdated(status.clone()),
                 &mut model,
             );
 
@@ -192,17 +179,14 @@ mod tests {
 
         #[test]
         fn updates_validation_status() {
-            let app = AppTester::<App>::default();
             let mut model = Model::default();
 
             let status = UpdateValidationStatus {
                 status: "Succeeded".into(),
             };
 
-            let _ = app.update(
-                Event::WebSocket(WebSocketEvent::UpdateValidationStatusUpdated(
-                    status.clone(),
-                )),
+            let _ = handle(
+                WebSocketEvent::UpdateValidationStatusUpdated(status.clone()),
                 &mut model,
             );
 
@@ -216,7 +200,6 @@ mod tests {
 
         #[test]
         fn updates_timeouts() {
-            let app = AppTester::<App>::default();
             let mut model = Model::default();
 
             let timeouts = Timeouts {
@@ -226,8 +209,8 @@ mod tests {
                 },
             };
 
-            let _ = app.update(
-                Event::WebSocket(WebSocketEvent::TimeoutsUpdated(timeouts.clone())),
+            let _ = handle(
+                WebSocketEvent::TimeoutsUpdated(timeouts.clone()),
                 &mut model,
             );
 
@@ -240,25 +223,88 @@ mod tests {
 
         #[test]
         fn connected_sets_is_connected() {
-            let app = AppTester::<App>::default();
             let mut model = Model::default();
 
-            let _ = app.update(Event::WebSocket(WebSocketEvent::Connected), &mut model);
+            let _ = handle(WebSocketEvent::Connected, &mut model);
 
             assert!(model.is_connected);
         }
 
         #[test]
         fn disconnected_clears_is_connected() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_connected: true,
                 ..Default::default()
             };
 
-            let _ = app.update(Event::WebSocket(WebSocketEvent::Disconnected), &mut model);
+            let _ = handle(WebSocketEvent::Disconnected, &mut model);
 
             assert!(!model.is_connected);
+        }
+    }
+
+    mod network_status {
+        use super::*;
+        use crate::types::{DeviceNetwork, InternetProtocol, IpAddress, NetworkStatus};
+
+        #[test]
+        fn updates_network_status() {
+            let mut model = Model::default();
+
+            let status = NetworkStatus {
+                network_status: vec![DeviceNetwork {
+                    name: "eth0".to_string(),
+                    mac: "00:11:22:33:44:55".to_string(),
+                    online: true,
+                    file: Some("/etc/network/interfaces".to_string()),
+                    ipv4: InternetProtocol {
+                        addrs: vec![IpAddress {
+                            addr: "192.168.1.100".to_string(),
+                            dhcp: false,
+                            prefix_len: 24,
+                        }],
+                        dns: vec![],
+                        gateways: vec![],
+                    },
+                }],
+            };
+
+            let _ = handle(
+                WebSocketEvent::NetworkStatusUpdated(status.clone()),
+                &mut model,
+            );
+
+            assert_eq!(model.network_status, Some(status));
+        }
+
+        #[test]
+        fn updates_current_connection_adapter_when_browser_hostname_set() {
+            let mut model = Model {
+                browser_hostname: Some("192.168.1.100".to_string()),
+                ..Default::default()
+            };
+
+            let status = NetworkStatus {
+                network_status: vec![DeviceNetwork {
+                    name: "eth0".to_string(),
+                    mac: "00:11:22:33:44:55".to_string(),
+                    online: true,
+                    file: Some("/etc/network/interfaces".to_string()),
+                    ipv4: InternetProtocol {
+                        addrs: vec![IpAddress {
+                            addr: "192.168.1.100".to_string(),
+                            dhcp: false,
+                            prefix_len: 24,
+                        }],
+                        dns: vec![],
+                        gateways: vec![],
+                    },
+                }],
+            };
+
+            let _ = handle(WebSocketEvent::NetworkStatusUpdated(status), &mut model);
+
+            assert_eq!(model.current_connection_adapter, Some("eth0".to_string()));
         }
     }
 }

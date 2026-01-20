@@ -9,11 +9,11 @@ The Crux Core follows the Model-View-Update pattern:
 - **Model** - The complete application state (auth, device info, network status, etc.)
 - **ViewModel** - Data needed by the UI to render
 - **Events** - Actions that can occur in the application
-- **Capabilities** - Side effects (HTTP requests, WebSocket, rendering)
+- **Effects** - Side effects (HTTP requests, WebSocket, rendering)
 
 ## Key Files
 
-- `src/lib.rs` - App struct, Capabilities, and re-exports
+- `src/lib.rs` - App struct, Effect enum, and re-exports
 - `src/model.rs` - Model and ViewModel structs
 - `src/events.rs` - Event enum definitions
 - `src/types/` - Domain-based type definitions
@@ -31,12 +31,15 @@ The Crux Core follows the Model-View-Update pattern:
   - `device/` - Device action handlers
     - `mod.rs` - Device event dispatcher
     - `operations.rs` - Device operations (reboot, factory reset, updates)
-    - `network.rs` - Network configuration handlers
     - `reconnection.rs` - Device reconnection handlers
+    - `network/` - Network configuration handlers
+      - `mod.rs` - Module re-exports
+      - `config.rs` - Network config request/response
+      - `form.rs` - Form state management
+      - `verification.rs` - IP check and rollback logic
   - `websocket.rs` - WebSocket/Centrifugo handlers
   - `ui.rs` - UI action handlers (clear error/success)
-- `src/capabilities/centrifugo.rs` - Custom WebSocket capability (deprecated API, kept for Effect enum generation)
-- `src/capabilities/centrifugo_command.rs` - Command-based WebSocket capability (new API)
+- `src/commands/centrifugo.rs` - Custom WebSocket commands
 
 ## Building
 
@@ -97,20 +100,6 @@ const errorMessage = computed(() => viewModel.error_message)
 5. Effects are processed (HTTP requests, render updates, etc.)
 6. ViewModel is updated and Vue re-renders
 
-## Capabilities
-
-### Render
-
-Updates the ViewModel to trigger UI re-rendering.
-
-### HTTP
-
-Makes REST API calls to the backend. The shell handles the actual HTTP request and sends the response back to the core.
-
-### Centrifugo
-
-Manages WebSocket subscriptions for real-time updates. The shell handles the actual WebSocket connection.
-
 ## Testing
 
 The core includes unit tests for business logic:
@@ -129,12 +118,8 @@ cargo clippy -p omnect-ui-core -- -D warnings
 
 **Additional Tasks:**
 
-- [ ] Add comprehensive integration tests for all migrated components
-- [ ] Add more unit tests for Core edge cases
-- [ ] Performance testing and bundle size optimization
+- [ ] Performance bundle size optimization
 
 ### Technical Debt
 
-- [ ] Remove deprecated capabilities once crux_core provides alternative Effect generation mechanism
 - [ ] Refactor `Model.auth_token` to not be serialized to the view model directly. The current approach of removing `#[serde(skip_serializing)]` in `src/app/src/model.rs` is a workaround for `shared_types` deserialization misalignment. A long-term solution should involve either making TypeGen respect `skip_serializing` or separating view-specific model fields.
-- [ ] Address `crux_http` error handling for non-2xx HTTP responses: The current implementation uses a workaround (`x-original-status` header in `useCore.ts` and corresponding logic in macros) because `crux_http` (v0.15) appears to discard response bodies for 4xx/5xx status codes, preventing detailed error messages from reaching the Core. This workaround should be removed if future `crux_http` versions provide a more direct way to access error response bodies.

@@ -1,4 +1,4 @@
-import { InMemoryWebStorage, UserManager, WebStorageStateStore } from "oidc-client-ts"
+import { UserManager, WebStorageStateStore } from "oidc-client-ts"
 
 const config = window.__APP_CONFIG__
 
@@ -9,7 +9,7 @@ const oidcConfig = {
 	response_type: "code",
 	scope: "openid profile email",
 	post_logout_redirect_uri: `https://${window.location.hostname}:${window.location.port}/`,
-	userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() })
+	userStore: new WebStorageStateStore({ store: window.localStorage })
 }
 
 const userManager = new UserManager(oidcConfig)

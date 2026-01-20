@@ -143,6 +143,7 @@ export function updateViewModelFromCore(): void {
 					update_validation_status: {
 						status: coreViewModel.healthcheck.update_validation_status.status,
 					},
+					network_rollback_occurred: coreViewModel.healthcheck.network_rollback_occurred,
 				}
 			: null
 
@@ -171,6 +172,17 @@ export function updateViewModelFromCore(): void {
 
 		// Network form dirty flag
 		viewModel.network_form_dirty = coreViewModel.network_form_dirty
+
+		// Browser hostname and current connection adapter (computed in Core)
+		viewModel.browser_hostname = coreViewModel.browser_hostname || null
+		viewModel.current_connection_adapter = coreViewModel.current_connection_adapter || null
+
+		// Device offline tracking
+		viewModel.device_went_offline = coreViewModel.device_went_offline
+
+		// Network rollback modal state (computed in Core)
+		viewModel.should_show_rollback_modal = coreViewModel.should_show_rollback_modal
+		viewModel.default_rollback_enabled = coreViewModel.default_rollback_enabled
 
 		// Firmware upload state
 		viewModel.firmware_upload_state = convertUploadState(coreViewModel.firmware_upload_state)

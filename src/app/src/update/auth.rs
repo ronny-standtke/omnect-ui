@@ -1,14 +1,14 @@
 use base64::prelude::*;
 use crux_core::Command;
 
-use crate::auth_post;
-use crate::auth_post_basic;
-use crate::events::{AuthEvent, Event};
-use crate::handle_response;
-use crate::model::Model;
-use crate::types::{AuthToken, SetPasswordRequest, UpdatePasswordRequest};
-use crate::unauth_post;
-use crate::Effect;
+use crate::{
+    auth_post, auth_post_basic,
+    events::{AuthEvent, Event},
+    handle_response,
+    model::Model,
+    types::{AuthToken, SetPasswordRequest, UpdatePasswordRequest},
+    unauth_post, Effect,
+};
 
 /// Handle authentication-related events
 pub fn handle(event: AuthEvent, model: &mut Model) -> Command<Effect, Event> {
@@ -87,21 +87,18 @@ pub fn handle(event: AuthEvent, model: &mut Model) -> Command<Effect, Event> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{App, Event};
-    use crux_core::testing::AppTester;
 
     mod login {
         use super::*;
 
         #[test]
         fn sets_loading_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model::default();
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::Login {
+            let _ = handle(
+                AuthEvent::Login {
                     password: "test_password".into(),
-                }),
+                },
                 &mut model,
             );
 
@@ -111,16 +108,15 @@ mod tests {
 
         #[test]
         fn success_sets_authenticated_and_stores_token() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::LoginResponse(Ok(AuthToken {
+            let _ = handle(
+                AuthEvent::LoginResponse(Ok(AuthToken {
                     token: "test_token_123".into(),
-                }))),
+                })),
                 &mut model,
             );
 
@@ -132,14 +128,13 @@ mod tests {
 
         #[test]
         fn failure_sets_error_and_not_authenticated() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::LoginResponse(Err("Invalid credentials".into()))),
+            let _ = handle(
+                AuthEvent::LoginResponse(Err("Invalid credentials".into())),
                 &mut model,
             );
 
@@ -151,16 +146,15 @@ mod tests {
 
         #[test]
         fn clears_previous_error_on_new_attempt() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 error_message: Some("Previous error".into()),
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::Login {
+            let _ = handle(
+                AuthEvent::Login {
                     password: "test".into(),
-                }),
+                },
                 &mut model,
             );
 
@@ -173,21 +167,19 @@ mod tests {
 
         #[test]
         fn sets_loading_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_authenticated: true,
                 auth_token: Some("token".into()),
                 ..Default::default()
             };
 
-            let _ = app.update(Event::Auth(AuthEvent::Logout), &mut model);
+            let _ = handle(AuthEvent::Logout, &mut model);
 
             assert!(model.is_loading);
         }
 
         #[test]
         fn success_clears_session() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_authenticated: true,
                 auth_token: Some("token".into()),
@@ -195,7 +187,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let _ = app.update(Event::Auth(AuthEvent::LogoutResponse(Ok(()))), &mut model);
+            let _ = handle(AuthEvent::LogoutResponse(Ok(())), &mut model);
 
             assert!(!model.is_authenticated);
             assert!(model.auth_token.is_none());
@@ -204,7 +196,6 @@ mod tests {
 
         #[test]
         fn failure_sets_error_but_keeps_session() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_authenticated: true,
                 auth_token: Some("token".into()),
@@ -212,8 +203,8 @@ mod tests {
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::LogoutResponse(Err("Network error".into()))),
+            let _ = handle(
+                AuthEvent::LogoutResponse(Err("Network error".into())),
                 &mut model,
             );
 
@@ -230,16 +221,15 @@ mod tests {
 
         #[test]
         fn sets_loading_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 requires_password_set: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::SetPassword {
+            let _ = handle(
+                AuthEvent::SetPassword {
                     password: "new_password".into(),
-                }),
+                },
                 &mut model,
             );
 
@@ -248,17 +238,13 @@ mod tests {
 
         #[test]
         fn success_clears_requires_password_set() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 requires_password_set: true,
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::SetPasswordResponse(Ok(()))),
-                &mut model,
-            );
+            let _ = handle(AuthEvent::SetPasswordResponse(Ok(())), &mut model);
 
             assert!(!model.requires_password_set);
             assert!(!model.is_loading);
@@ -270,17 +256,14 @@ mod tests {
 
         #[test]
         fn failure_keeps_requires_password_set() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 requires_password_set: true,
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::SetPasswordResponse(Err(
-                    "Password too weak".into()
-                ))),
+            let _ = handle(
+                AuthEvent::SetPasswordResponse(Err("Password too weak".into())),
                 &mut model,
             );
 
@@ -295,18 +278,17 @@ mod tests {
 
         #[test]
         fn sets_loading_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_authenticated: true,
                 auth_token: Some("token".into()),
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::UpdatePassword {
+            let _ = handle(
+                AuthEvent::UpdatePassword {
                     current_password: "old_pass".into(),
                     password: "new_pass".into(),
-                }),
+                },
                 &mut model,
             );
 
@@ -315,7 +297,6 @@ mod tests {
 
         #[test]
         fn success_shows_success_message() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_authenticated: true,
                 auth_token: Some("token".into()),
@@ -323,10 +304,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::UpdatePasswordResponse(Ok(()))),
-                &mut model,
-            );
+            let _ = handle(AuthEvent::UpdatePasswordResponse(Ok(())), &mut model);
 
             assert!(!model.is_loading);
             assert_eq!(
@@ -340,7 +318,6 @@ mod tests {
 
         #[test]
         fn failure_shows_error() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_authenticated: true,
                 auth_token: Some("token".into()),
@@ -348,10 +325,8 @@ mod tests {
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::UpdatePasswordResponse(Err(
-                    "Current password incorrect".into(),
-                ))),
+            let _ = handle(
+                AuthEvent::UpdatePasswordResponse(Err("Current password incorrect".into())),
                 &mut model,
             );
 
@@ -370,25 +345,23 @@ mod tests {
 
         #[test]
         fn sets_loading_state() {
-            let app = AppTester::<App>::default();
             let mut model = Model::default();
 
-            let _ = app.update(Event::Auth(AuthEvent::CheckRequiresPasswordSet), &mut model);
+            let _ = handle(AuthEvent::CheckRequiresPasswordSet, &mut model);
 
             assert!(model.is_loading);
         }
 
         #[test]
         fn response_true_sets_requires_password_set() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 requires_password_set: false,
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::CheckRequiresPasswordSetResponse(Ok(true))),
+            let _ = handle(
+                AuthEvent::CheckRequiresPasswordSetResponse(Ok(true)),
                 &mut model,
             );
 
@@ -398,15 +371,14 @@ mod tests {
 
         #[test]
         fn response_false_clears_requires_password_set() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 requires_password_set: true,
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::CheckRequiresPasswordSetResponse(Ok(false))),
+            let _ = handle(
+                AuthEvent::CheckRequiresPasswordSetResponse(Ok(false)),
                 &mut model,
             );
 
@@ -416,16 +388,13 @@ mod tests {
 
         #[test]
         fn failure_sets_error() {
-            let app = AppTester::<App>::default();
             let mut model = Model {
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = app.update(
-                Event::Auth(AuthEvent::CheckRequiresPasswordSetResponse(Err(
-                    "Server error".into(),
-                ))),
+            let _ = handle(
+                AuthEvent::CheckRequiresPasswordSetResponse(Err("Server error".into())),
                 &mut model,
             );
 

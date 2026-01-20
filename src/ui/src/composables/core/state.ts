@@ -42,6 +42,13 @@ export const viewModel = reactive<ViewModel>({
 	network_form_state: { type: 'idle' },
 	// Network form dirty flag
 	network_form_dirty: false,
+	// Browser hostname and current connection detection
+	browser_hostname: null,
+	current_connection_adapter: null,
+	device_went_offline: false,
+	// Network rollback modal state
+	should_show_rollback_modal: false,
+	default_rollback_enabled: true,
 	// Firmware upload state
 	firmware_upload_state: { type: 'idle' },
 	// Overlay spinner state
