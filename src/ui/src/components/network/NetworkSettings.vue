@@ -8,7 +8,7 @@ import type { DeviceNetwork } from "../../types"
 import type { NetworkConfigRequest } from "../../composables/useCore"
 
 const { showError } = useSnackbar()
-const { viewModel, setNetworkConfig, networkFormReset, networkFormUpdate, networkFormStartEdit } = useCore()
+const { viewModel, setNetworkConfig, networkFormReset, networkFormUpdate } = useCore()
 const { copy } = useClipboard()
 const { isValidIp: validateIp, parseNetmask } = useIPValidation()
 
@@ -28,10 +28,10 @@ const isSubmitting = ref(false)
 const isSyncingFromWebSocket = ref(false)
 const isStartingFreshEdit = ref(false)
 
-// Initialize form editing state in Core when component mounts
+// NOTE: NetworkFormStartEdit is now called by the parent DeviceNetworks.vue when tab changes
+// This prevents all mounted components from calling it simultaneously
 // Set flag to prevent the dirty flag watch from resetting form during initialization
 isStartingFreshEdit.value = true
-networkFormStartEdit(props.networkAdapter.name)
 nextTick(() => {
     nextTick(() => {
         isStartingFreshEdit.value = false
@@ -64,6 +64,8 @@ const sendFormUpdateToCore = () => {
 // Use flush: 'post' to ensure watcher runs after all DOM updates
 watch([ipAddress, dns, gateways, addressAssignment, netmask], () => {
     // Don't update dirty flag during submit or WebSocket sync
+    // Note: Core validates adapter_name matches the currently editing adapter
+    // This defends against hidden components (v-window) sending stale data
     if (!isSubmitting.value && !isSyncingFromWebSocket.value) {
         sendFormUpdateToCore()
     }
@@ -100,25 +102,30 @@ watch(() => viewModel.network_form_dirty, (isDirty, wasDirty) => {
 })
 
 // Watch for prop changes from WebSocket updates and sync local state
+// IMPORTANT: We watch the entire adapter object to ensure reactivity,
+// but only reset form fields if not dirty. This allows props.networkAdapter.online
+// to remain reactive even when the form is dirty.
 watch(() => props.networkAdapter, (newAdapter) => {
     if (!newAdapter) return
 
-    // Don't overwrite user's unsaved changes during submit or when user has made edits
-    if (isSubmitting.value || viewModel.network_form_dirty) {
-        return
-    }
+    // Only reset form fields if user hasn't made unsaved changes
+    // But we still need to let this watcher run to maintain reactivity for
+    // non-form props like 'online' status
+    if (!isSubmitting.value && !viewModel.network_form_dirty) {
+        // Set flag to prevent form watchers from firing during sync
+        isSyncingFromWebSocket.value = true
+        resetFormFields()
 
-    // Set flag to prevent form watchers from firing during sync
-    isSyncingFromWebSocket.value = true
-    resetFormFields()
-
-    // Clear flag after Vue finishes all reactive updates AND all post-flush watchers
-    // Need double nextTick: first for reactive updates, second for post-flush watchers
-    nextTick(() => {
+        // Clear flag after Vue finishes all reactive updates AND all post-flush watchers
+        // Need double nextTick: first for reactive updates, second for post-flush watchers
         nextTick(() => {
-            isSyncingFromWebSocket.value = false
+            nextTick(() => {
+                isSyncingFromWebSocket.value = false
+            })
         })
-    })
+    }
+    // Note: We don't return early when dirty - this allows Vue's reactivity
+    // system to track changes to props.networkAdapter.online and other non-form props
 }, { deep: true })
 
 const isDHCP = computed(() => addressAssignment.value === "dhcp")

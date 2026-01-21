@@ -194,7 +194,6 @@ mod tests {
         use super::*;
 
         #[test]
-        #[ignore]
         fn tick_increments_attempt_counter() {
             let mut model = Model {
                 network_change_state: NetworkChangeState::WaitingForNewIp {
@@ -210,9 +209,12 @@ mod tests {
 
             let _ = handle_new_ip_check_tick(&mut model);
 
+            // Verify attempt counter was incremented
             if let NetworkChangeState::WaitingForNewIp { attempt, .. } = model.network_change_state
             {
                 assert_eq!(attempt, 1);
+            } else {
+                panic!("Expected WaitingForNewIp state");
             }
         }
 

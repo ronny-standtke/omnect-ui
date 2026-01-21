@@ -4,7 +4,7 @@ import NetworkSettings from "./NetworkSettings.vue"
 import { useCore } from "../../composables/useCore"
 import { useCoreInitialization } from "../../composables/useCoreInitialization"
 
-const { viewModel, networkFormReset } = useCore()
+const { viewModel, networkFormReset, networkFormStartEdit } = useCore()
 
 useCoreInitialization()
 
@@ -38,6 +38,9 @@ watch(tab, (newTab, oldTab) => {
     // Revert tab back to old tab
     isReverting.value = true
     tab.value = oldTab
+  } else if (newTab) {
+    // Tab change successful - notify Core to start editing this adapter
+    networkFormStartEdit(newTab as string)
   }
 })
 
@@ -54,6 +57,10 @@ const confirmTabChange = () => {
 
     // Now switch to the pending tab
     tab.value = pendingTab.value
+
+    // Start editing the new adapter
+    networkFormStartEdit(pendingTab.value)
+
     pendingTab.value = null
   }
   showUnsavedChangesDialog.value = false
@@ -77,7 +84,7 @@ const cancelTabChange = () => {
           :value="networkAdapter.name"></v-tab>
       </v-tabs>
       <v-window v-model="tab" class="w[20vw]" direction="vertical">
-        <v-window-item v-for="networkAdapter in networkStatus?.network_status" :value="networkAdapter.name">
+        <v-window-item v-for="networkAdapter in networkStatus?.network_status" :key="networkAdapter.name" :value="networkAdapter.name">
           <NetworkSettings :networkAdapter="networkAdapter" :isCurrentConnection="isCurrentConnection(networkAdapter)" />
         </v-window-item>
       </v-window>

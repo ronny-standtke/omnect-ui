@@ -51,6 +51,14 @@ pub fn handle_network_form_update(
                 ..
             } = &model.network_form_state
             {
+                // Validate that this update is for the adapter currently being edited
+                // This protects against hidden Shell components (like v-window-items in Vue)
+                // sending updates for non-active adapters
+                if adapter_name != &form_data.name {
+                    // Silently ignore updates from non-active adapters
+                    return crux_core::render::render();
+                }
+
                 let is_dirty = form_data != *original_data;
 
                 // Compute rollback modal flags
@@ -247,6 +255,55 @@ mod tests {
             {
                 assert_eq!(form_data.ip_address, "192.168.1.100");
                 assert_eq!(original_data.ip_address, "192.168.1.100");
+            }
+            assert!(!model.network_form_dirty);
+        }
+
+        #[test]
+        fn ignores_updates_from_non_active_adapter() {
+            // Setup: editing eth0, but receive update for wlan0
+            let eth0_data = NetworkFormData {
+                name: "eth0".to_string(),
+                ip_address: "192.168.1.100".to_string(),
+                dhcp: false,
+                prefix_len: 24,
+                dns: vec!["8.8.8.8".to_string()],
+                gateways: vec!["192.168.1.1".to_string()],
+            };
+
+            let wlan0_data = NetworkFormData {
+                name: "wlan0".to_string(),
+                ip_address: "192.168.2.100".to_string(),
+                dhcp: false,
+                prefix_len: 24,
+                dns: vec!["8.8.8.8".to_string()],
+                gateways: vec!["192.168.2.1".to_string()],
+            };
+
+            let mut model = Model {
+                network_form_state: NetworkFormState::Editing {
+                    adapter_name: "eth0".to_string(),
+                    form_data: eth0_data.clone(),
+                    original_data: eth0_data.clone(),
+                },
+                network_form_dirty: false,
+                ..Default::default()
+            };
+
+            // Send update for wlan0 while eth0 is being edited
+            let _ =
+                handle_network_form_update(serde_json::to_string(&wlan0_data).unwrap(), &mut model);
+
+            // State should remain unchanged
+            if let NetworkFormState::Editing {
+                adapter_name,
+                form_data,
+                ..
+            } = &model.network_form_state
+            {
+                assert_eq!(adapter_name, "eth0");
+                assert_eq!(form_data.ip_address, "192.168.1.100");
+                assert_eq!(form_data.name, "eth0");
             }
             assert!(!model.network_form_dirty);
         }
