@@ -143,4 +143,7 @@ COPY --from=builder /copy/status.d /var/lib/dpkg/status.d
 WORKDIR "/"
 COPY src/backend/config/centrifugo_config.json /
 
+ARG RUST_LOG="warn,omnect_ui=debug"
+ENV RUST_LOG=${RUST_LOG}
+
 ENTRYPOINT [ "/omnect-ui" ]

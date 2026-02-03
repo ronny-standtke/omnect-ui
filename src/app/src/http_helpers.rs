@@ -7,10 +7,12 @@ use crux_http::Response;
 
 /// Base URL for omnect-device API endpoints.
 ///
-/// NOTE: This URL is prefixed as a workaround because `crux_http` (v0.16.0-rc2) panics
-/// when given a relative URL in some environments (e.g. `cargo test`).
-/// The UI shell (`useCore.ts`) strips this prefix before sending the request.
-pub const BASE_URL: &str = "http://omnect-device";
+/// NOTE: This is a dummy prefix required because `crux_http` (v0.16.0-rc2) requires
+/// absolute URLs and rejects relative paths (`RelativeUrlWithoutBase` error).
+/// The UI shell (`http.ts`) strips this prefix before sending requests via `fetch()`,
+/// making them relative to avoid HTTPS certificate CN/SAN validation issues.
+/// Using https:// to prevent any potential mixed content warnings on HTTPS pages.
+pub const BASE_URL: &str = "https://relative";
 
 /// Constructs the full address from a given endpoint.
 ///
@@ -18,13 +20,13 @@ pub const BASE_URL: &str = "http://omnect-device";
 /// * `endpoint` - The API endpoint path (e.g., "/api/device/reboot")
 ///
 /// # Returns
-/// A string containing the full URL: `http://omnect-device{endpoint}`
+/// A string containing the full URL with dummy prefix
 ///
 /// # Example
 /// ```
 /// use omnect_ui_core::http_helpers::build_url;
 /// let url = build_url("/api/device/reboot");
-/// assert_eq!(url, "http://omnect-device/api/device/reboot");
+/// assert_eq!(url, "https://relative/api/device/reboot");
 /// ```
 pub fn build_url(endpoint: &str) -> String {
     format!("{BASE_URL}{endpoint}")

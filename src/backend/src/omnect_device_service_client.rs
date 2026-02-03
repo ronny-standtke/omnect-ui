@@ -129,7 +129,6 @@ pub struct OmnectDeviceServiceClient {
 #[cfg_attr(feature = "mock", automock)]
 pub trait DeviceServiceClient {
     async fn fleet_id(&self) -> Result<String>;
-    async fn ip_address(&self) -> Result<String>;
     async fn status(&self) -> Result<Status>;
     async fn republish(&self) -> Result<()>;
     async fn factory_reset(&self, factory_reset: FactoryReset) -> Result<()>;
@@ -252,22 +251,6 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
         };
 
         Ok(fleet_id)
-    }
-
-    async fn ip_address(&self) -> Result<String> {
-        // we return the first online ipv4 address that was found
-        self.status()
-            .await?
-            .network_status
-            .network_interfaces
-            .iter()
-            .find_map(|iface| {
-                iface
-                    .online
-                    .then(|| iface.ipv4.addrs.first().map(|addr| addr.addr.clone()))
-                    .flatten()
-            })
-            .context("failed to get ip address from status")
     }
 
     async fn status(&self) -> Result<Status> {

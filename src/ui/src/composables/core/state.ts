@@ -74,14 +74,14 @@ export const authToken = ref<string | null>(null)
  * WASM module reference (set when WASM is loaded)
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export let wasmModule: any = null
+export const wasmModule = ref<any>(null)
 
 /**
  * Set the WASM module reference
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function setWasmModule(module: any): void {
-	wasmModule = module
+	wasmModule.value = module
 }
 
 /**

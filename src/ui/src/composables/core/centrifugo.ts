@@ -5,7 +5,7 @@
  * for real-time updates from omnect-device-service (ODS).
  */
 
-import { centrifugoInstance } from './state'
+import { centrifugoInstance, wasmModule } from './state'
 import { stringToFactoryResetStatus } from './types'
 import { CentrifugeSubscriptionType } from '../../enums/centrifuge-subscription-type.enum'
 import type {
@@ -37,6 +37,7 @@ import {
 	Timeouts,
 	Duration,
 	CentrifugoOperationVariantSubscribeAll,
+	CentrifugoOperationVariantUnsubscribeAll,
 	CentrifugoOutputVariantConnected,
 	CentrifugoOutputVariantDisconnected,
 	CentrifugoOutputVariantError,
@@ -174,11 +175,11 @@ async function parseAndSendChannelEvent(channel: string, jsonData: string): Prom
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function executeCentrifugoOperation(requestId: number, operation: any): Promise<void> {
 	const sendResponse = async (output: any) => {
-		if (!wasmModule) return
+		if (!wasmModule.value) return
 		const serializer = new BincodeSerializer()
 		output.serialize(serializer)
 		const responseBytes = serializer.getBytes()
-		const newEffectsBytes = wasmModule.handle_response(requestId, responseBytes) as Uint8Array
+		const newEffectsBytes = wasmModule.value.handle_response(requestId, responseBytes) as Uint8Array
 		if (newEffectsBytes.length > 0 && processEffectsCallback) {
 			await processEffectsCallback(newEffectsBytes)
 		}

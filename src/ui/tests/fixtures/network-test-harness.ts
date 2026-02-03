@@ -501,15 +501,15 @@ export class NetworkTestHarness {
   }
 
   /**
-   * Helper to click Save and verify the operation completes successfully.
+   * Helper to click Apply Changes and verify the operation completes successfully.
    *
    * @param page - Playwright page instance
    * @param timeout - Timeout for the operation to complete (default: 10000)
    */
   async saveAndVerify(page: Page, timeout: number = 10000): Promise<void> {
-    const saveButton = page.getByRole('button', { name: /save/i });
+    const saveButton = page.locator('.v-window-item--active [data-cy=network-apply-button]');
     await saveButton.click();
-    await expect(saveButton).toBeEnabled({ timeout });
+    await expect(saveButton).toBeDisabled({ timeout });
     await expect(page.getByText('Network configuration updated')).toBeVisible();
   }
 

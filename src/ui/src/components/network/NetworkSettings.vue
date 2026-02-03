@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue"
 import { useSnackbar } from "../../composables/useSnackbar"
-import { useCore } from "../../composables/useCore"
+import { useCore, NetworkConfigRequest } from "../../composables/useCore"
 import { useClipboard } from "../../composables/useClipboard"
 import { useIPValidation } from "../../composables/useIPValidation"
 import type { DeviceNetwork } from "../../types"
-import type { NetworkConfigRequest } from "../../composables/useCore"
 
 const { showError } = useSnackbar()
 const { viewModel, setNetworkConfig, networkFormReset, networkFormUpdate } = useCore()
@@ -205,19 +204,19 @@ const submitNetworkConfig = async (includeRollback: boolean) => {
     isSubmitting.value = true
     confirmationModalOpen.value = false
 
-    const config: NetworkConfigRequest = {
-        isServerAddr: props.isCurrentConnection,
-        ipChanged: props.networkAdapter.ipv4?.addrs[0]?.addr !== ipAddress.value,
-        name: props.networkAdapter.name,
-        dhcp: isDHCP.value,
-        ip: ipAddress.value || null,
-        previousIp: props.networkAdapter.ipv4?.addrs[0]?.addr || null,
-        netmask: netmask.value || null,
-        gateway: gateways.value.split("\n").filter(g => g.trim()) || [],
-        dns: dns.value.split("\n").filter(d => d.trim()) || [],
-        enableRollback: includeRollback ? enableRollback.value : null,
-        switchingToDhcp: switchingToDhcp.value
-    }
+    const config = new NetworkConfigRequest(
+        props.isCurrentConnection,
+        props.networkAdapter.ipv4?.addrs[0]?.addr !== ipAddress.value,
+        props.networkAdapter.name,
+        isDHCP.value,
+        ipAddress.value || null,
+        props.networkAdapter.ipv4?.addrs[0]?.addr || null,
+        netmask.value || null,
+        gateways.value.split("\n").filter(g => g.trim()) || [],
+        dns.value.split("\n").filter(d => d.trim()) || [],
+        includeRollback ? enableRollback.value : null,
+        switchingToDhcp.value
+    )
 
     await setNetworkConfig(JSON.stringify(config))
 }
@@ -272,7 +271,7 @@ const cancelRollbackModal = () => {
                     <v-btn color="secondary" variant="text" @click="cancelRollbackModal">
                         Cancel
                     </v-btn>
-                    <v-btn color="primary" variant="text" @click="submitNetworkConfig(true)">
+                    <v-btn color="primary" variant="text" @click="submitNetworkConfig(true)" data-cy="network-confirm-apply-button">
                         Apply Changes
                     </v-btn>
                 </v-card-actions>
@@ -313,11 +312,11 @@ const cancelRollbackModal = () => {
             <v-textarea v-model="dns" label="DNS" variant="outlined" rows="3" no-resize
                 append-inner-icon="mdi-content-copy" @click:append-inner="copy(ipAddress)"></v-textarea>
             <div class="flex flex-row gap-x-4">
-                <v-btn color="secondary" type="submit" variant="text" :loading="isSubmitting">
-                    Save
+                <v-btn color="secondary" type="submit" variant="text" :loading="isSubmitting" :disabled="!viewModel.network_form_dirty" data-cy="network-apply-button">
+                    Apply Changes
                 </v-btn>
-                <v-btn :disabled="isSubmitting" type="reset" variant="text" @click.prevent="restoreSettings">
-                    Reset
+                <v-btn :disabled="isSubmitting || !viewModel.network_form_dirty" type="reset" variant="text" @click.prevent="restoreSettings" data-cy="network-discard-button">
+                    Discard Changes
                 </v-btn>
             </div>
         </v-form>

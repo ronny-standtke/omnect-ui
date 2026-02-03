@@ -4,6 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Determine host architecture
 HOST_ARCH="$(uname -m)"
@@ -25,18 +26,18 @@ echo "Building image for $ARCH architecture..."
 IMAGE_NAME="omnectshareddevacr.azurecr.io/omnect-ui:${IMAGE_TAG}"
 
 # Ensure required directories exist
-mkdir -p "$SCRIPT_DIR/temp/data"
-mkdir -p "$SCRIPT_DIR/temp/network"
+mkdir -p "$PROJECT_ROOT/temp/data"
+mkdir -p "$PROJECT_ROOT/temp/network"
 
 # ensure presence of:
 # /tmp/api.sock (normally created by a local instance of omnect-device-service)
 # ./temp/cert.pem and ./temp/key.pem (certificate and key file)
 echo "Running container..."
 docker run --rm \
-  -v "$SCRIPT_DIR/temp:/cert" \
+  -v "$PROJECT_ROOT/temp:/cert" \
   -v /tmp:/socket \
-  -v "$SCRIPT_DIR/temp/data:/data" \
-  -v "$SCRIPT_DIR/temp/network:/network" \
+  -v "$PROJECT_ROOT/temp/data:/data" \
+  -v "$PROJECT_ROOT/temp/network:/network" \
   -u "$(id -u):$(id -g)" \
   -e RUST_LOG=debug \
   -e UI_PORT="$UI_PORT" \

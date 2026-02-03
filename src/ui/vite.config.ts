@@ -1,9 +1,9 @@
 import vue from "@vitejs/plugin-vue"
+import fs from "node:fs"
+import path from "node:path"
 import UnoCSS from "unocss/vite"
 import { defineConfig } from "vite"
 import Vuetify, { transformAssetUrls } from "vite-plugin-vuetify"
-import fs from "fs"
-import path from "path"
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -11,7 +11,7 @@ export default defineConfig({
 		vue({
 			template: { transformAssetUrls }
 		}),
-		Vuetify(),
+		Vuetify() as any,
 		UnoCSS()
 	],
 	css: {

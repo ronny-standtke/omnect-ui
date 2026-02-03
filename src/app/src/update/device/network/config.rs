@@ -139,6 +139,7 @@ pub fn handle_set_network_config_response(
             // Reset form state back to editing on failure
             if let Some(editing) = model.network_form_state.to_editing() {
                 model.network_form_state = editing;
+                model.network_form_dirty = true;
             }
             crux_core::render::render()
         }
@@ -361,6 +362,7 @@ mod tests {
             model.network_form_state,
             NetworkFormState::Editing { .. }
         ));
+        assert!(model.network_form_dirty);
         assert_eq!(model.error_message, Some("Failed to set config".into()));
     }
 }

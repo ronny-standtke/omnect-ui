@@ -100,7 +100,7 @@ const cancelTabChange = () => {
         <v-card-actions>
           <v-spacer></v-spacer>
           <v-btn color="primary" text @click="cancelTabChange">Cancel</v-btn>
-          <v-btn color="error" text @click="confirmTabChange">Discard Changes</v-btn>
+          <v-btn color="error" text @click="confirmTabChange" data-cy="network-confirm-discard-button">Discard Changes</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

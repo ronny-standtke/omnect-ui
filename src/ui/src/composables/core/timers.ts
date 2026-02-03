@@ -65,7 +65,7 @@ export function startReconnectionPolling(isFactoryReset: boolean): void {
 
 	// Start polling interval
 	reconnectionIntervalId = setInterval(() => {
-		if (isInitialized.value && wasmModule && sendEventCallback) {
+		if (isInitialized.value && wasmModule.value && sendEventCallback) {
 			sendEventCallback(new EventVariantDevice(new DeviceEventVariantReconnectionCheckTick()))
 		}
 	}, RECONNECTION_POLL_INTERVAL_MS)
@@ -74,7 +74,7 @@ export function startReconnectionPolling(isFactoryReset: boolean): void {
 	const timeoutMs = isFactoryReset ? FACTORY_RESET_TIMEOUT_MS : REBOOT_TIMEOUT_MS
 	reconnectionTimeoutId = setTimeout(() => {
 		console.log('[useCore] Reconnection timeout reached')
-		if (isInitialized.value && wasmModule && sendEventCallback) {
+		if (isInitialized.value && wasmModule.value && sendEventCallback) {
 			sendEventCallback(new EventVariantDevice(new DeviceEventVariantReconnectionTimeout()))
 		}
 		stopReconnectionPolling()
@@ -234,7 +234,7 @@ export function startNewIpPolling(): void {
 	// If switching to DHCP, we don't know the IP so polling is useless
 	if (!switchingToDhcp) {
 		newIpIntervalId = setInterval(() => {
-			if (isInitialized.value && wasmModule && sendEventCallback) {
+			if (isInitialized.value && wasmModule.value && sendEventCallback) {
 				sendEventCallback(new EventVariantDevice(new DeviceEventVariantNewIpCheckTick()))
 			}
 		}, NEW_IP_POLL_INTERVAL_MS)
@@ -264,7 +264,7 @@ export function startNewIpPolling(): void {
 		// Set timeout
 		newIpTimeoutId = setTimeout(() => {
 			console.log('[useCore] New IP polling timeout reached')
-			if (isInitialized.value && wasmModule && sendEventCallback) {
+			if (isInitialized.value && wasmModule.value && sendEventCallback) {
 				sendEventCallback(new EventVariantDevice(new DeviceEventVariantNewIpCheckTimeout()))
 			}
 			stopNewIpPolling()
@@ -289,7 +289,7 @@ export function stopNewIpPolling(): void {
 		newIpTimeoutId = null
 	}
 	// Clear countdown seconds in viewModel
-	viewModel.overlay_spinner.countdown_seconds = undefined
+	viewModel.overlay_spinner.countdown_seconds = null
 	// Clear countdown deadline
 	countdownDeadline = null
 }
@@ -309,6 +309,9 @@ export function initializeTimerWatchers(): void {
 		(newState, oldState) => {
 			const newType = newState?.type
 			const oldType = oldState?.type
+
+			// Only act on type transitions
+			if (newType === oldType) return
 
 			// Start polling when entering rebooting, factory_resetting, or updating state
 			if (newType === 'rebooting' || newType === 'factory_resetting' || newType === 'updating') {
@@ -349,7 +352,10 @@ export function initializeTimerWatchers(): void {
 			}
 
 			// Clear localStorage when entering terminal states (success, timeout, or idle)
-			if (newType === 'new_ip_reachable' || newType === 'new_ip_timeout' || newType === 'waiting_for_old_ip' || newType === 'idle') {
+			if (
+				newType !== oldType &&
+				(newType === 'new_ip_reachable' || newType === 'new_ip_timeout' || newType === 'idle')
+			) {
 				clearNetworkChangeState()
 			}
 

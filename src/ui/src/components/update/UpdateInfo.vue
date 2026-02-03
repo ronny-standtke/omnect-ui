@@ -4,10 +4,10 @@ import { useCore } from "../../composables/useCore"
 import type { UpdateManifest } from "../../types/update-manifest"
 import KeyValuePair from "../ui-components/KeyValuePair.vue"
 
-const { viewModel, runUpdate } = useCore()
+const { runUpdate } = useCore()
 
 const props = defineProps<{
-	updateManifest: UpdateManifest | undefined
+	updateManifest: UpdateManifest | null | undefined
 	currentVersion: string | undefined
 	loadUpdateFetching: boolean
 }>()
@@ -41,9 +41,9 @@ const toggleEnforceConnect = (v: boolean | null) => {
 			<KeyValuePair title="omnect Secure OS variant">{{ updateManifest.updateId.name }}</KeyValuePair>
 			<KeyValuePair title="Current omnect Secure OS version">{{ props.currentVersion }}</KeyValuePair>
 			<KeyValuePair title="Update omnect Secure OS version">{{ updateManifest.updateId.version }}</KeyValuePair>
-			<KeyValuePair title="Manufacturer">{{ updateManifest.compatibility[0].manufacturer }}</KeyValuePair>
-			<KeyValuePair title="Model">{{ updateManifest.compatibility[0].model }}</KeyValuePair>
-			<KeyValuePair title="Compatibility Id">{{ updateManifest.compatibility[0].compatibilityid }}</KeyValuePair>
+			<KeyValuePair title="Manufacturer">{{ updateManifest.compatibility[0]?.manufacturer }}</KeyValuePair>
+			<KeyValuePair title="Model">{{ updateManifest.compatibility[0]?.model }}</KeyValuePair>
+			<KeyValuePair title="Compatibility Id">{{ updateManifest.compatibility[0]?.compatibilityid }}</KeyValuePair>
 			<KeyValuePair title="Created">{{ updateManifest.createdDateTime ? new
 				Date(updateManifest.createdDateTime).toLocaleString() : "" }}</KeyValuePair>
 		</dl>

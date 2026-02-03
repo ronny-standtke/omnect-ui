@@ -56,7 +56,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await eth0IpInput.fill('192.168.1.150');
       await page.waitForTimeout(300);
 
-      await page.getByRole('button', { name: /save/i }).click();
+      await page.locator('.v-window-item--active [data-cy=network-apply-button]').click();
 
       // Rollback modal SHOULD appear for current connection adapter
       const rollbackModal = page.getByText('Confirm Network Configuration Change');
@@ -67,7 +67,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await expect(rollbackModal).not.toBeVisible();
 
       // Reset the form
-      await page.getByRole('button', { name: /reset/i }).click();
+      await page.locator('.v-window-item--active [data-cy=network-discard-button]').click();
       await page.waitForTimeout(300);
 
       // Part 2: Test non-current adapter (wlan0) - should NOT show rollback modal
@@ -117,7 +117,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       // Verify the value was actually set
       await expect(wlan0IpInput).toHaveValue('192.168.2.150');
 
-      const saveButton = page.getByRole('button', { name: /save/i });
+      const saveButton = page.locator('.v-window-item--active [data-cy=network-apply-button]');
       await saveButton.click();
 
       // Rollback modal should NOT appear for non-current adapter
@@ -127,7 +127,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await expect(rollbackModal).not.toBeVisible({ timeout: 2000 });
 
       // Should proceed directly to saving (no rollback modal blocking it)
-      await expect(saveButton).toBeEnabled({ timeout: 10000 });
+      await expect(saveButton).toBeDisabled({ timeout: 10000 });
       await expect(page.getByText('Network configuration updated')).toBeVisible();
     });
 
@@ -163,7 +163,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       // Now discard and switch
       await page.getByRole('tab', { name: 'wlan0' }).click();
       await expect(page.getByText('Unsaved Changes', { exact: true })).toBeVisible();
-      await page.getByRole('button', { name: /discard/i }).click();
+      await page.locator('[data-cy=network-confirm-discard-button]').click();
       await page.waitForTimeout(300);
 
       // Verify we switched to wlan0
@@ -217,11 +217,11 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       let ipInput = page.getByRole('textbox', { name: /IP Address/i }).first();
       await ipInput.fill('192.168.1.150');
       await page.waitForTimeout(300);
-      await page.getByRole('button', { name: /save/i }).click();
+      await page.locator('.v-window-item--active [data-cy=network-apply-button]').click();
 
       await expect(rollbackModal).toBeVisible({ timeout: 3000 });
       await page.getByRole('button', { name: /cancel/i }).click();
-      await page.getByRole('button', { name: /reset/i }).click();
+      await page.locator('.v-window-item--active [data-cy=network-discard-button]').click();
       await page.waitForTimeout(300);
 
       // Test 2: wlan0 (not current) - should NOT show rollback modal
@@ -236,11 +236,11 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await page.waitForTimeout(500);
       await expect(ipInput).toHaveValue('192.168.2.150');
 
-      const saveButton = page.getByRole('button', { name: /save/i });
+      const saveButton = page.locator('.v-window-item--active [data-cy=network-apply-button]');
       await saveButton.click();
 
       await expect(rollbackModal).not.toBeVisible({ timeout: 2000 });
-      await expect(saveButton).toBeEnabled({ timeout: 10000 });
+      await expect(saveButton).toBeDisabled({ timeout: 10000 });
       await expect(page.getByText('Network configuration updated')).toBeVisible();
 
       // Wait for form to reset after submission
@@ -258,12 +258,15 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await page.waitForTimeout(500);
       await expect(ipInput).toHaveValue('10.0.0.100');
 
-      const saveButton2 = page.getByRole('button', { name: /save/i });
+      const saveButton2 = page.locator('.v-window-item--active [data-cy=network-apply-button]');
       await saveButton2.click();
 
       await expect(rollbackModal).not.toBeVisible({ timeout: 2000 });
-      await expect(saveButton2).toBeEnabled({ timeout: 10000 });
+      await expect(saveButton2).toBeDisabled({ timeout: 10000 });
       await expect(page.getByText('Network configuration updated')).toBeVisible();
+
+      // Wait for form to reset after submission
+
     });
 
     test('form state isolation across multiple adapter switches', async ({ page }) => {
@@ -300,7 +303,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await expect(page.getByText('Unsaved Changes', { exact: true })).toBeVisible();
 
       // Discard and switch
-      await page.getByRole('button', { name: /discard/i }).click();
+      await page.locator('[data-cy=network-confirm-discard-button]').click();
       await page.waitForTimeout(300);
 
       // Verify we're on wlan0
@@ -328,7 +331,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await expect(ipInput).toHaveValue('192.168.1.88');
 
       // Now discard and verify each adapter has its correct original state
-      await page.getByRole('button', { name: /reset/i }).click();
+      await page.locator('.v-window-item--active [data-cy=network-discard-button]').click();
       await page.waitForTimeout(300);
       await expect(ipInput).toHaveValue('localhost');
 
@@ -403,9 +406,9 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await expect(ipInput).toHaveValue('192.168.2.150');
 
       // User can still save with their value
-      const saveButton = page.getByRole('button', { name: /save/i });
+      const saveButton = page.locator('.v-window-item--active [data-cy=network-apply-button]');
       await saveButton.click();
-      await expect(saveButton).toBeEnabled({ timeout: 10000 });
+      await expect(saveButton).toBeDisabled({ timeout: 10000 });
       await expect(page.getByText('Network configuration updated')).toBeVisible();
     });
 
@@ -429,7 +432,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await page.waitForTimeout(300);
 
       // Click Save - rollback modal appears for current connection adapter
-      await page.getByRole('button', { name: /save/i }).click();
+      await page.locator('.v-window-item--active [data-cy=network-apply-button]').click();
 
       const rollbackModal = page.getByText('Confirm Network Configuration Change');
       await expect(rollbackModal).toBeVisible({ timeout: 3000 });
@@ -447,7 +450,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await expect(rollbackModal).not.toBeVisible();
 
       // Reset the form
-      await page.getByRole('button', { name: /reset/i }).click();
+      await page.locator('.v-window-item--active [data-cy=network-discard-button]').click();
       await page.waitForTimeout(300);
 
       // Now tab switch should work normally (no modal blocking)
@@ -484,10 +487,10 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       let ipInput = page.getByRole('textbox', { name: /IP Address/i }).first();
       await ipInput.fill('192.168.1.150');
       await page.waitForTimeout(300);
-      await page.getByRole('button', { name: /save/i }).click();
+      await page.locator('.v-window-item--active [data-cy=network-apply-button]').click();
       await expect(rollbackModal).toBeVisible({ timeout: 3000 });
       await page.getByRole('button', { name: /cancel/i }).click();
-      await page.getByRole('button', { name: /reset/i }).click();
+      await page.locator('.v-window-item--active [data-cy=network-discard-button]').click();
       await page.waitForTimeout(300);
 
       // Verify wlan0 is NOT marked as current connection (even though it has same IP)
@@ -502,10 +505,10 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await ipInput.fill('192.168.2.150');
       await page.waitForTimeout(500);
 
-      const saveButton = page.getByRole('button', { name: /save/i });
+      const saveButton = page.locator('.v-window-item--active [data-cy=network-apply-button]');
       await saveButton.click();
       await expect(rollbackModal).not.toBeVisible({ timeout: 2000 });
-      await expect(saveButton).toBeEnabled({ timeout: 10000 });
+      await expect(saveButton).toBeDisabled({ timeout: 10000 });
       await expect(page.getByText('Network configuration updated')).toBeVisible();
 
       await page.waitForTimeout(1000);
@@ -521,11 +524,13 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await ipInput.fill('10.0.0.100');
       await page.waitForTimeout(500);
 
-      const saveButton2 = page.getByRole('button', { name: /save/i });
+      const saveButton2 = page.locator('.v-window-item--active [data-cy=network-apply-button]');
       await saveButton2.click();
       await expect(rollbackModal).not.toBeVisible({ timeout: 2000 });
-      await expect(saveButton2).toBeEnabled({ timeout: 10000 });
+      await expect(saveButton2).toBeDisabled({ timeout: 10000 });
       await expect(page.getByText('Network configuration updated')).toBeVisible();
+
+      // Wait for form to reset after submission
     });
 
     test('rapid tab switching with edits shows correct dirty state', async ({ page }) => {
@@ -577,7 +582,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       // Click wlan0 again → discard changes
       await page.getByRole('tab', { name: 'wlan0' }).click();
       await expect(page.getByText('Unsaved Changes', { exact: true })).toBeVisible();
-      await page.getByRole('button', { name: /discard/i }).click();
+      await page.locator('[data-cy=network-confirm-discard-button]').click();
       await page.waitForTimeout(300);
 
       // Now on wlan0, verify original IP
@@ -593,7 +598,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       // Click eth1 → discard
       await page.getByRole('tab', { name: 'eth1' }).click();
       await expect(page.getByText('Unsaved Changes', { exact: true })).toBeVisible();
-      await page.getByRole('button', { name: /discard/i }).click();
+      await page.locator('[data-cy=network-confirm-discard-button]').click();
       await page.waitForTimeout(300);
 
       // Verify eth1 shows original IP, dirty = false (no unsaved changes)
@@ -705,7 +710,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await page.waitForTimeout(500);
 
       // Verify form is dirty
-      await expect(page.getByRole('button', { name: /reset/i })).toBeEnabled();
+      await expect(page.locator('.v-window-item--active [data-cy=network-discard-button]')).toBeEnabled();
 
       // While form is dirty, simulate eth0 going offline (cable removed)
       await harness.publishNetworkStatus([

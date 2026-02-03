@@ -18,11 +18,12 @@ export type {
 	HealthcheckInfo,
 	Event,
 	Effect,
-	CoreViewModel,
+	Model as CoreViewModel,
 	UpdateManifest,
 	NetworkFormData,
-	NetworkConfigRequest,
 } from '../../../../shared_types/generated/typescript/types/shared_types'
+
+export { NetworkConfigRequest } from '../../../../shared_types/generated/typescript/types/shared_types'
 
 // Import types and variant classes for conversions
 import {
@@ -157,7 +158,7 @@ export interface ViewModel {
 	update_manifest: UpdateManifest | null
 	timeouts: { wait_online_timeout: { nanos: number; secs: bigint } } | null
 	healthcheck: {
-		version_info: { version: string; git_sha: string }
+		version_info: { required: string; current: string; mismatch: boolean }
 		update_validation_status: { status: string }
 		network_rollback_occurred: boolean
 	} | null

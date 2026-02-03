@@ -165,9 +165,9 @@ macro_rules! unauth_post {
 /// Used for login endpoint which requires Basic auth instead of Bearer token.
 /// Returns string body (e.g., auth token) on success, with optional conversion to target type.
 ///
-/// NOTE: Endpoints are prefixed with `http://omnect-device` as a workaround.
-/// `crux_http` panics when given a relative URL in some environments (e.g. `cargo test`).
-/// The UI shell (`useCore.ts`) strips this prefix before sending the request.
+/// NOTE: URLs are prefixed with `https://relative` (dummy host) as a workaround.
+/// `crux_http` requires absolute URLs and rejects relative paths.
+/// The UI shell (`http.ts`) strips this prefix before sending requests.
 ///
 /// # Example
 /// ```ignore
@@ -202,9 +202,9 @@ macro_rules! auth_post_basic {
 /// Macro for authenticated POST requests with standard error handling.
 /// Reduces boilerplate for POST requests that require authentication.
 ///
-/// NOTE: Endpoints are prefixed with `http://omnect-device` as a workaround.
-/// `crux_http` panics when given a relative URL in some environments (e.g. `cargo test`).
-/// The UI shell (`useCore.ts`) strips this prefix before sending the request.
+/// NOTE: URLs are prefixed with `https://relative` (dummy host) as a workaround.
+/// `crux_http` requires absolute URLs and rejects relative paths.
+/// The UI shell (`http.ts`) strips this prefix before sending requests.
 /// This workaround should be removed once `crux_http` supports relative URLs gracefully.
 ///
 /// # Patterns
@@ -360,7 +360,7 @@ macro_rules! auth_post {
 ///
 /// # Example
 /// ```ignore
-/// http_get!(Device, DeviceEvent, "http://omnect-device/healthcheck", HealthcheckResponse, HealthcheckInfo)
+/// http_get!(Device, DeviceEvent, "https://relative/healthcheck", HealthcheckResponse, HealthcheckInfo)
 /// ```
 #[macro_export]
 macro_rules! http_get {

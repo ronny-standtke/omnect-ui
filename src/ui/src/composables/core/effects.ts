@@ -37,7 +37,7 @@ export function setViewModelUpdater(callback: () => void): void {
  * - Centrifugo: Subscribe to WebSocket channels (only SubscribeAll)
  */
 export async function processEffects(effectsBytes: Uint8Array): Promise<void> {
-	if (!wasmModule) {
+	if (!wasmModule.value) {
 		console.warn('WASM module not loaded, cannot process effects')
 		return
 	}

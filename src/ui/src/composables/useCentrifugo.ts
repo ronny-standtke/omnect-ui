@@ -125,9 +125,9 @@ export function useCentrifuge() {
 		}
 		try {
 			const res = await centrifuge.value.history(channel, { limit: 1 })
-			if (res && res.publications.length > 0) {
-				// Check if res is defined
-				callback(res.publications[0].data as T)
+			const firstPub = res?.publications?.[0]
+			if (firstPub?.data) {
+				callback(firstPub.data as T)
 			}
 		} catch (e) {
 			console.error(`[Centrifugo] History failed for ${channel}:`, e)

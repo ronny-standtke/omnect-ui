@@ -39,3 +39,6 @@ export type {
 	UpdateManifest,
 	NetworkFormData,
 } from './core'
+
+// Re-export NetworkConfigRequest class for value usage
+export { NetworkConfigRequest } from './core'

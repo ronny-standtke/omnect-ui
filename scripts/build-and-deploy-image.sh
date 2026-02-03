@@ -7,6 +7,9 @@
 
 set -e
 
+# Change directory to the project root (parent of the scripts directory)
+cd "$(dirname "$0")/.."
+
 # Default configuration
 DEVICE_HOST="${DEVICE_HOST:-}"
 DEVICE_USER="${DEVICE_USER:-omnect}"
@@ -15,6 +18,7 @@ DEVICE_PORT="${DEVICE_PORT:-1977}"
 IMAGE_TAG="${IMAGE_TAG:-$(whoami)}"
 IMAGE_ARCH="${IMAGE_ARCH:-arm64}"
 DOCKER_NAMESPACE="${DOCKER_NAMESPACE:-omnectweucopsacr.azurecr.io}"
+RUST_LOG="${RUST_LOG:-warn,omnect_ui=debug}"
 IMAGE_NAME="omnectshareddevacr.azurecr.io/omnect-ui:${IMAGE_TAG}"
 IMAGE_TAR="/tmp/omnect-ui-${IMAGE_ARCH}.tar"
 
@@ -35,6 +39,7 @@ OPTIONS:
   --port <port>         UI port on target device (default: $DEVICE_PORT)
   --tag <tag>           Docker image tag (default: \$(whoami))
   --namespace <ns>      Docker registry namespace (default: omnectweucopsacr.azurecr.io)
+  --rust-log <level>    Rust log level (default: warn,omnect_ui=debug)
   --help                Show this help message
 
 ENVIRONMENT VARIABLES:
@@ -45,12 +50,14 @@ ENVIRONMENT VARIABLES:
   IMAGE_TAG             Docker image tag (default: \$(whoami))
   IMAGE_ARCH            Target architecture (default: arm64)
   DOCKER_NAMESPACE      Docker registry namespace (default: omnectweucopsacr.azurecr.io)
+  RUST_LOG              Rust log level (default: warn,omnect_ui=debug)
 
 EXAMPLES:
   $0                                    # Build only (arm64)
   $0 --arch amd64                       # Build for amd64
   $0 --clean                            # Clean build without cache
   $0 --push                             # Build and push to registry
+  $0 --rust-log debug                   # Build with debug logging
   $0 --deploy --host 192.168.1.100      # Build and deploy to specific device
   $0 --deploy --host 192.168.1.100 --password mypassword # Build and deploy with password
   $0 --push --deploy --host 192.168.1.100  # Build, push to registry, and deploy
@@ -108,6 +115,10 @@ while [[ $# -gt 0 ]]; do
       DOCKER_NAMESPACE="$2"
       shift 2
       ;;
+    --rust-log)
+      RUST_LOG="$2"
+      shift 2
+      ;;
     --help)
       usage
       exit 0
@@ -147,7 +158,7 @@ if [[ "$IMAGE_ARCH" != "$(uname -m)" ]]; then
 fi
 
 # Build with or without cache
-BUILD_ARGS="--platform linux/${IMAGE_ARCH} --load -f Dockerfile . -t $IMAGE_NAME --build-arg GIT_SHORT_REV=$GIT_SHORT_REV --build-arg DOCKER_NAMESPACE=${DOCKER_NAMESPACE}"
+BUILD_ARGS="--platform linux/${IMAGE_ARCH} --load -f Dockerfile . -t $IMAGE_NAME --build-arg GIT_SHORT_REV=$GIT_SHORT_REV --build-arg DOCKER_NAMESPACE=${DOCKER_NAMESPACE} --build-arg RUST_LOG=${RUST_LOG}"
 if [[ "$CLEAN" == "true" ]]; then
   echo "Performing clean build (no cache)..."
   docker buildx build --no-cache $BUILD_ARGS

@@ -35,7 +35,7 @@ use anyhow::{Context, Result};
 use env_logger::{Builder, Env, Target};
 use log::{debug, error, info, warn};
 use rustls::crypto::{CryptoProvider, ring::default_provider};
-use std::io::Write;
+use std::{io::Write, sync::Mutex};
 use tokio::{
     process::{Child, Command},
     signal::unix::{SignalKind, signal},
@@ -44,6 +44,9 @@ use tokio::{
 
 const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
+
+// Cached common name (IP address) used for the current certificate
+static CACHED_COMMON_NAME: Mutex<Option<String>> = Mutex::new(None);
 
 // Include the generated static files from build.rs
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
@@ -137,6 +140,47 @@ fn initialize() -> Result<()> {
     Ok(())
 }
 
+async fn needs_certificate_recreation(
+    service_client: &OmnectDeviceServiceClient,
+) -> Result<Option<String>> {
+    // Check if we have a cached common name
+    let cached = CACHED_COMMON_NAME.lock().unwrap().clone();
+
+    // Get all current IP addresses from network interfaces
+    let status = service_client.status().await?;
+    let all_ips: Vec<String> = status
+        .network_status
+        .network_interfaces
+        .iter()
+        .filter(|iface| iface.online)
+        .flat_map(|iface| iface.ipv4.addrs.iter().map(|addr| addr.addr.clone()))
+        .collect();
+
+    if let Some(cached_ip) = cached {
+        // Certificate needs recreation if cached IP is not in current IP list
+        if !all_ips.contains(&cached_ip) {
+            // Return the first IP as the new common name
+            Ok(Some(
+                all_ips
+                    .first()
+                    .cloned()
+                    .context("failed to get IP address from status")?,
+            ))
+        } else {
+            // Certificate still valid
+            Ok(None)
+        }
+    } else {
+        // No cached IP, need to create certificate
+        Ok(Some(
+            all_ips
+                .first()
+                .cloned()
+                .context("failed to get IP address from status")?,
+        ))
+    }
+}
+
 async fn run_until_shutdown(
     service_client: &mut OmnectDeviceServiceClient,
     restart_rx: &mut broadcast::Receiver<()>,
@@ -144,15 +188,20 @@ async fn run_until_shutdown(
 ) -> Result<ShutdownReason> {
     info!("starting server");
 
-    // 1. create the cert with the ip in CommonName
-    let common_name = service_client
-        .ip_address()
-        .await
-        .context("failed to get IP address")?;
-
-    CertificateService::create_module_certificate(CreateCertPayload { common_name })
+    // 1. create the cert with the ip in CommonName (only if IP changed)
+    if let Some(current_ip) = needs_certificate_recreation(service_client).await? {
+        info!("creating new certificate for IP: {current_ip}");
+        CertificateService::create_module_certificate(CreateCertPayload {
+            common_name: current_ip.clone(),
+        })
         .await
         .context("failed to create certificate")?;
+
+        // Update cached common name
+        *CACHED_COMMON_NAME.lock().unwrap() = Some(current_ip);
+    } else {
+        info!("certificate still valid, skipping recreation");
+    }
 
     // 2. run centrifugo with valid cert
     let mut centrifugo = run_centrifugo().context("failed to start centrifugo")?;
@@ -187,13 +236,13 @@ async fn run_until_shutdown(
         result = server_task => {
             match result {
                 Ok(Ok(())) => debug!("server stopped normally"),
-                Ok(Err(e)) => debug!("server stopped with error: {e}"),
-                Err(e) => debug!("server task panicked: {e}"),
+                Ok(Err(e)) => error!("server stopped with error: {e}"),
+                Err(e) => error!("server task panicked: {e}"),
             }
             ShutdownReason::Shutdown
         },
         _ = centrifugo.wait() => {
-            debug!("centrifugo stopped unexpectedly");
+            error!("centrifugo stopped unexpectedly");
             ShutdownReason::Shutdown
         }
     };
