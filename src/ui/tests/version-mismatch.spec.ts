@@ -7,21 +7,20 @@ test.describe('Version Mismatch', () => {
     await mockRequireSetPassword(page);
 
     // Mock healthcheck with version mismatch
-    // Note: Backend uses snake_case for JSON field names
     await page.route('**/healthcheck', async (route) => {
       await route.fulfill({
         status: 503,
         contentType: 'application/json',
         body: JSON.stringify({
-          version_info: {
+          versionInfo: {
             required: '>=0.39.0',
             current: '0.35.0',
             mismatch: true,
           },
-          update_validation_status: {
+          updateValidationStatus: {
             status: 'valid',
           },
-          network_rollback_occurred: false,
+          networkRollbackOccurred: false,
         }),
       });
     });
@@ -50,15 +49,15 @@ test.describe('Version Mismatch', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          version_info: {
+          versionInfo: {
             required: '>=0.39.0',
             current: '0.40.0',
             mismatch: false,
           },
-          update_validation_status: {
+          updateValidationStatus: {
             status: 'valid',
           },
-          network_rollback_occurred: false,
+          networkRollbackOccurred: false,
         }),
       });
     });

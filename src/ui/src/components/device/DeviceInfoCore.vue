@@ -20,49 +20,49 @@ useCoreInitialization()
 const deviceInfo = computed(
   () =>
     new Map([
-      ['omnect Cloud Connection', viewModel.online_status?.iothub ? 'connected' : 'disconnected'],
-      ['omnect Secure OS variant', viewModel.system_info?.os.name ?? 'n/a'],
+      ['omnect Cloud Connection', viewModel.onlineStatus?.iothub ? 'connected' : 'disconnected'],
+      ['omnect Secure OS variant', viewModel.systemInfo?.os.name ?? 'n/a'],
       [
         'Boot time',
-        viewModel.system_info?.boot_time
-          ? new Date(viewModel.system_info.boot_time).toLocaleString()
+        viewModel.systemInfo?.bootTime
+          ? new Date(viewModel.systemInfo.bootTime).toLocaleString()
           : 'n/a',
       ],
-      ['omnect Secure OS version', String(viewModel.system_info?.os.version) ?? 'n/a'],
-      ['Wait online timeout (in seconds)', viewModel.timeouts?.wait_online_timeout.secs ?? 'n/a'],
+      ['omnect Secure OS version', String(viewModel.systemInfo?.os.version) ?? 'n/a'],
+      ['Wait online timeout (in seconds)', viewModel.timeouts?.waitOnlineTimeout.secs ?? 'n/a'],
       [
         'omnect device service version',
-        viewModel.system_info?.omnect_device_service_version ?? 'n/a',
+        viewModel.systemInfo?.omnectDeviceServiceVersion ?? 'n/a',
       ],
-      ['Azure SDK version', viewModel.system_info?.azure_sdk_version ?? 'n/a'],
-      ['Update status', viewModel.update_validation_status?.status ?? 'n/a'],
+      ['Azure SDK version', viewModel.systemInfo?.azureSdkVersion ?? 'n/a'],
+      ['Update status', viewModel.updateValidationStatus?.status ?? 'n/a'],
     ])
 )
 
 // Factory reset status from Core
-const factoryResetStatus = computed(() => viewModel.factory_reset?.result?.status ?? 'unknown')
-const factoryResetResult = computed(() => viewModel.factory_reset?.result ?? null)
+const factoryResetStatus = computed(() => viewModel.factoryReset?.result?.status ?? 'unknown')
+const factoryResetResult = computed(() => viewModel.factoryReset?.result ?? null)
 
 // Map Core status strings to display values
 const factoryResetDisplayStatus = computed(() => {
   switch (factoryResetStatus.value) {
-    case 'mode_supported':
+    case 'modeSupported':
       return 'Succeeded'
-    case 'mode_unsupported':
+    case 'modeUnsupported':
       return 'Mode Unsupported'
-    case 'backup_restore_error':
+    case 'backupRestoreError':
       return 'Backup/Restore Error'
-    case 'configuration_error':
+    case 'configurationError':
       return 'Configuration Error'
     default:
       return 'n/a'
   }
 })
 
-const isSuccess = computed(() => factoryResetStatus.value === 'mode_supported')
+const isSuccess = computed(() => factoryResetStatus.value === 'modeSupported')
 const isError = computed(
   () =>
-    factoryResetStatus.value !== 'unknown' && factoryResetStatus.value !== 'mode_supported'
+    factoryResetStatus.value !== 'unknown' && factoryResetStatus.value !== 'modeSupported'
 )
 
 const displayItems = computed(() =>

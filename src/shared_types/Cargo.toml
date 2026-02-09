@@ -13,5 +13,5 @@ version.workspace = true
 [build-dependencies]
 anyhow = "1.0"
 crux_core = { version = "0.17.0-rc2", features = ["typegen"] }
-crux_http = { version = "0.16.0-rc1", features = ["typegen"] }
+crux_http = { version = "0.16.0-rc2", features = ["typegen"] }
 omnect-ui-core = { path = "../app", features = ["typegen"] }

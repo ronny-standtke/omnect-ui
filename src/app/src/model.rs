@@ -12,6 +12,7 @@ pub trait ModelErrorHandler {
 /// Application Model - the complete state
 /// Also serves as the ViewModel when serialized (auth_token is excluded)
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Model {
     // Device state
     pub system_info: Option<SystemInfo>,
@@ -40,22 +41,21 @@ pub struct Model {
     // Device operation state (reboot/factory reset reconnection)
     pub device_operation_state: DeviceOperationState,
     pub reconnection_attempt: u32,
-    pub reconnection_timeout_seconds: u32,
     pub device_went_offline: bool,
 
     // Network change state (IP change detection and polling)
     pub network_change_state: NetworkChangeState,
 
-    // Network form state (editing without WebSocket interference)
+    // Network form state
     pub network_form_state: NetworkFormState,
 
     // Network form dirty flag (tracks unsaved changes)
     pub network_form_dirty: bool,
 
-    // Browser hostname (from window.location.hostname) - used for network connection detection
+    // Browser hostname
     pub browser_hostname: Option<String>,
 
-    // Current connection adapter name (computed from browser_hostname + network_status)
+    // Current connection adapter name
     pub current_connection_adapter: Option<String>,
 
     // Network rollback modal state

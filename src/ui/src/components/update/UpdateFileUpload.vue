@@ -13,32 +13,43 @@ const emit = defineEmits<(e: "fileUploaded", filename: string) => void>()
 const updateFile = ref<File>()
 
 // Derived state from Core
-const uploadState = computed(() => viewModel.firmware_upload_state)
+const uploadState = computed(() => viewModel.firmwareUploadState)
 const isUploading = computed(() => uploadState.value?.type === 'uploading')
 
 watch(
-	() => viewModel.device_operation_state,
+	() => viewModel.deviceOperationState,
 	(state) => {
-		if (state.type === 'reconnection_successful' && state.operation === 'Update') {
+		if (state.type === 'reconnectionSuccessful' && state.operation === 'Update') {
 			updateFile.value = undefined
 		}
 	},
 	{ deep: true }
 )
 
+// Auto-upload when file is selected
+watch(updateFile, (newFile) => {
+	if (newFile) {
+		uploadFile()
+	}
+})
+
+const replaceFile = () => {
+	updateFile.value = undefined
+}
+
 const uploadFile = async () => {
-	if (!viewModel.is_authenticated) {
+	if (!viewModel.isAuthenticated) {
 		router.push("/login")
 		return
 	}
 
 	if (!updateFile.value) {
-		showError("Select an update file.")
 		return
 	}
 
 	if (updateFile.value.type !== "application/x-tar") {
 		showError("Wrong file type. Only tar archives are allowed.")
+		updateFile.value = undefined // Reset if invalid
 		return
 	}
 
@@ -83,20 +94,34 @@ const uploadFile = async () => {
 </script>
 
 <template>
-	<v-form @submit.prevent="uploadFile" enctype="multipart/form-data">
-		<v-file-upload icon="mdi-file-upload" v-model="updateFile" clearable density="default"
-			:disabled="isUploading">
-			<template #item="{ file, props }">
-				<v-file-upload-item v-bind="props">
-					<template #title>
-						<div class="flex justify-between">
-							<div>{{ file.name }}</div>
-						</div>
-					</template>
-				</v-file-upload-item>
-			</template>
+	<v-form enctype="multipart/form-data">
+		<!-- Drop Zone (Visible when no file is selected) -->
+		<v-file-upload v-if="!updateFile" icon="mdi-file-upload" v-model="updateFile" clearable density="compact"
+			title="Drag and drop update file here" class="update-drop-zone" :disabled="isUploading">
 		</v-file-upload>
-		<v-btn type="submit" prepend-icon="mdi-file-upload-outline" variant="text"
-			:disabled="!updateFile || isUploading" class="mt-4">Upload</v-btn>
+
+		<!-- Compact File Card (Visible when file is selected) -->
+		<v-card v-else variant="outlined" class="d-flex align-center pa-4 bg-surface-light">
+			<v-icon icon="mdi-file-check" color="success" class="mr-4" size="large"></v-icon>
+			<div class="flex-grow-1">
+				<div class="text-subtitle-1 font-weight-medium">{{ updateFile.name }}</div>
+				<div class="text-caption text-medium-emphasis">
+					{{ (updateFile.size / 1024 / 1024).toFixed(2) }} MB
+					<span v-if="isUploading"> - Uploading...</span>
+				</div>
+			</div>
+			<v-btn variant="text" color="primary" size="small" @click="replaceFile" :disabled="isUploading">
+				Replace File
+			</v-btn>
+		</v-card>
 	</v-form>
 </template>
+
+<style scoped>
+/* Reduce the vertical height of the drop zone and change visual style */
+:deep(.v-file-upload .v-input__control) {
+	min-height: 120px !important;
+	border-style: solid !important;
+	background-color: rgba(var(--v-theme-on-surface), 0.04) !important;
+}
+</style>

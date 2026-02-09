@@ -13,9 +13,12 @@ COPY Cargo.lock Cargo.toml ./
 COPY src ./src
 
 # Build shared_types to generate TypeScript bindings (runs on host arch, fast)
-# Note: pnpm is required by crux_core TypeGen (it's in BUILD_IMAGE)
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --release -p shared_types
+# Note: pnpm is required by crux_core TypeGen, but we use a dummy to avoid hangs
+RUN mkdir -p /tmp/bin && \
+    echo '#!/bin/sh' > /tmp/bin/pnpm && \
+    echo 'exit 0' >> /tmp/bin/pnpm && \
+    chmod +x /tmp/bin/pnpm && \
+    PATH="/tmp/bin:$PATH" cargo build --release -p shared_types
 
 # Stage 2: Build Crux WASM core (parallel with typegen)
 FROM --platform=$BUILDPLATFORM ${BUILD_IMAGE} AS wasm-build

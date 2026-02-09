@@ -4,31 +4,24 @@ import OmnectLogo from "../components/branding/OmnectLogo.vue"
 import PasswordField from "../components/common/PasswordField.vue"
 import { useCore } from "../composables/useCore"
 import { useCoreInitialization } from "../composables/useCoreInitialization"
-import { useMessageWatchers } from "../composables/useMessageWatchers"
 import { usePasswordForm } from "../composables/usePasswordForm"
 import { useAuthNavigation } from "../composables/useAuthNavigation"
 
-const { setPassword, login, viewModel } = useCore()
+const { viewModel, setPassword } = useCore()
 const { password, repeatPassword, errorMsg, validatePasswords } = usePasswordForm()
 
 useCoreInitialization()
+// SetPasswordResponse now directly authenticates (sets auth_token + is_authenticated),
+// so useAuthNavigation's isAuthenticated watcher handles the redirect to home.
 useAuthNavigation()
 
-// Watch for successful password set to trigger auto-login
 watch(
-	() => viewModel.requires_password_set,
-	async (requiresPasswordSet) => {
-		if (requiresPasswordSet === false && password.value) {
-			await login(password.value)
-		}
-	}
+	() => viewModel.errorMessage,
+	(msg) => {
+		if (msg) errorMsg.value = msg
+	},
+	{ flush: 'sync' }
 )
-
-useMessageWatchers({
-	onError: (message) => {
-		errorMsg.value = message
-	}
-})
 
 const handleSubmit = async (): Promise<void> => {
 	if (!validatePasswords()) return
@@ -37,7 +30,7 @@ const handleSubmit = async (): Promise<void> => {
 </script>
 
 <template>
-	<v-sheet class="mx-auto pa-12 pb-8 m-t-16 flex flex-col gap-y-16" border elevation="0" max-width="448" rounded="lg">
+	<v-sheet class="mx-auto pa-8 m-t-16 flex flex-col gap-y-16" border elevation="0" max-width="448" rounded="lg">
 		<OmnectLogo></OmnectLogo>
 		<h1>Set Password</h1>
 		<v-form @submit.prevent @submit="handleSubmit">
@@ -50,7 +43,7 @@ const handleSubmit = async (): Promise<void> => {
 				label="Repeat password"
 			/>
 			<p style="color: rgb(var(--v-theme-error))">{{ errorMsg }}</p>
-			<v-btn class="mb-8" color="secondary" size="large" variant="text" type="submit" block>
+			<v-btn class="mb-8" color="primary" size="large" variant="flat" type="submit" block>
 				Set password
 			</v-btn>
 		</v-form>

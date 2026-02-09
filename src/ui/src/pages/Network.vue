@@ -14,12 +14,11 @@ let pendingRoute: any = null
 const waitingForReset = ref(false)
 
 // Watch for form reset completion (dirty flag clears)
-watch(() => viewModel.network_form_dirty, (isDirty, wasDirty) => {
+watch(() => viewModel.networkFormDirty, (isDirty, wasDirty) => {
   // If we're waiting for reset and dirty flag changed from true to false, proceed with navigation
   if (waitingForReset.value && wasDirty === true && isDirty === false) {
     waitingForReset.value = false
 
-    // Use programmatic navigation instead of trying to resume the blocked navigation
     if (pendingRoute) {
       router.push(pendingRoute)
       pendingRoute = null
@@ -29,7 +28,7 @@ watch(() => viewModel.network_form_dirty, (isDirty, wasDirty) => {
 
 // Navigation guard to prevent leaving page with unsaved changes
 onBeforeRouteLeave((to, _from, next) => {
-  if (viewModel.network_form_dirty === true) {
+  if (viewModel.networkFormDirty === true) {
     showNavigationDialog.value = true
     pendingRoute = to // Save the destination route
     next(false) // Block navigation
@@ -40,8 +39,8 @@ onBeforeRouteLeave((to, _from, next) => {
 
 const confirmNavigation = () => {
   // User confirmed, discard changes and navigate
-  const currentAdapter = viewModel.network_form_state?.type === 'editing'
-    ? (viewModel.network_form_state as any).adapter_name
+  const currentAdapter = viewModel.networkFormState?.type === 'editing'
+    ? (viewModel.networkFormState as any).adapterName
     : null
 
   showNavigationDialog.value = false
@@ -69,8 +68,8 @@ const cancelNavigation = () => {
 </script>
 
 <template>
-    <v-sheet :border="true" rounded class="m-20">
-        <div class="flex flex-col gap-y-16 m-8">
+    <v-sheet :border="true" rounded class="ma-4">
+        <div class="flex flex-col gap-y-16 ma-4">
             <DeviceNetworks></DeviceNetworks>
         </div>
     </v-sheet>
@@ -84,8 +83,8 @@ const cancelNavigation = () => {
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <v-btn color="primary" text @click="cancelNavigation">Cancel</v-btn>
-          <v-btn color="error" text @click="confirmNavigation" data-cy="network-confirm-discard-button">Discard Changes</v-btn>
+          <v-btn color="primary" variant="text" @click="cancelNavigation">Cancel</v-btn>
+          <v-btn color="error" variant="text" @click="confirmNavigation" data-cy="network-confirm-discard-button">Discard Changes</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

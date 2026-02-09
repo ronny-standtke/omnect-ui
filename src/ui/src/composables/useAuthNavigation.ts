@@ -22,7 +22,7 @@ export function useAuthNavigation() {
 
   // Watch for successful authentication
   watch(
-    () => viewModel.is_authenticated,
+    () => viewModel.isAuthenticated,
     async (isAuthenticated) => {
       if (isAuthenticated) {
         await router.push("/")
@@ -30,10 +30,10 @@ export function useAuthNavigation() {
     }
   )
 
-  // Watch for requires_password_set state change
+  // Watch for requiresPasswordSet state change
   // Only navigate if we're not already on the set-password page
   watch(
-    () => viewModel.requires_password_set,
+    () => viewModel.requiresPasswordSet,
     async (requiresPasswordSet) => {
       if (requiresPasswordSet && route.path !== "/set-password") {
         await router.push("/set-password")

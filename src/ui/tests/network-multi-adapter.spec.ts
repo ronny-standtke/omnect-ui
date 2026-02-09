@@ -25,7 +25,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
   });
 
   test.describe('2-Adapter Scenarios', () => {
-    test('REGRESSION: rollback modal only appears for current connection adapter', async ({ page }) => {
+    test('rollback modal only appears for current connection adapter', async ({ page }) => {
       // Setup two adapters: eth0 (current connection) and wlan0 (not current)
       await harness.setup(page, [
         {
@@ -48,7 +48,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
 
       // Part 1: Test current connection adapter (eth0) - SHOULD show rollback modal
       await page.getByRole('tab', { name: 'eth0' }).click();
-      await expect(page.getByText('(current connection)')).toBeVisible();
+      await expect(page.getByText('This is your current connection')).toBeVisible();
 
       const eth0IpInput = page.getByRole('textbox', { name: /IP Address/i }).first();
       await expect(eth0IpInput).toHaveValue('localhost');
@@ -72,12 +72,12 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
 
       // Part 2: Test non-current adapter (wlan0) - should NOT show rollback modal
       await page.getByRole('tab', { name: 'wlan0' }).click();
-      await expect(page.getByText('(current connection)')).not.toBeVisible();
+      await expect(page.getByText('This is your current connection')).not.toBeVisible();
 
       // Wait for tab to fully activate and NetworkFormStartEdit to be called
       await page.waitForTimeout(500);
 
-      // Trigger a WebSocket update to eth0 (the hidden adapter) to reproduce the bug
+      // Trigger a WebSocket update to the hidden adapter
       // This simulates what happens in production when network status changes
       await harness.publishNetworkStatus([
         {
@@ -112,18 +112,16 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await wlan0IpInput.click();
       await wlan0IpInput.clear();
       await wlan0IpInput.fill('192.168.2.150');
-      await page.waitForTimeout(500); // Give watchers time to update dirty flag
+      await page.waitForTimeout(500);
 
-      // Verify the value was actually set
       await expect(wlan0IpInput).toHaveValue('192.168.2.150');
 
       const saveButton = page.locator('.v-window-item--active [data-cy=network-apply-button]');
       await saveButton.click();
 
       // Rollback modal should NOT appear for non-current adapter
-      // This is the CRITICAL assertion - if this fails, the bug has regressed
-      // BUG: Without the fix, eth0's hidden component sends NetworkFormUpdate with eth0's data,
-      // causing Core to think eth0 is being edited, which triggers the rollback modal
+      // Verify that background updates to other adapters don't trigger the rollback modal
+      // and ensure only the active adapter's state affects the UI.
       await expect(rollbackModal).not.toBeVisible({ timeout: 2000 });
 
       // Should proceed directly to saving (no rollback modal blocking it)
@@ -212,7 +210,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
 
       // Test 1: eth0 (current connection) - SHOULD show rollback modal
       await page.getByRole('tab', { name: 'eth0' }).click();
-      await expect(page.getByText('(current connection)')).toBeVisible();
+      await expect(page.getByText('This is your current connection')).toBeVisible();
 
       let ipInput = page.getByRole('textbox', { name: /IP Address/i }).first();
       await ipInput.fill('192.168.1.150');
@@ -226,7 +224,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
 
       // Test 2: wlan0 (not current) - should NOT show rollback modal
       await page.getByRole('tab', { name: 'wlan0' }).click();
-      await expect(page.getByText('(current connection)')).not.toBeVisible();
+      await expect(page.getByText('This is your current connection')).not.toBeVisible();
 
       ipInput = page.getByRole('textbox', { name: /IP Address/i }).first();
       await expect(ipInput).toHaveValue('192.168.2.100');
@@ -248,7 +246,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
 
       // Test 3: eth1 (not current) - should NOT show rollback modal
       await page.getByRole('tab', { name: 'eth1' }).click();
-      await expect(page.getByText('(current connection)')).not.toBeVisible();
+      await expect(page.getByText('This is your current connection')).not.toBeVisible();
 
       ipInput = page.getByRole('textbox', { name: /IP Address/i }).first();
       await expect(ipInput).toHaveValue('10.0.0.50');
@@ -481,7 +479,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
 
       // Verify eth0 is marked as current connection
       await page.getByRole('tab', { name: 'eth0' }).click();
-      await expect(page.getByText('(current connection)')).toBeVisible();
+      await expect(page.getByText('This is your current connection')).toBeVisible();
 
       // Edit eth0, verify rollback modal appears
       let ipInput = page.getByRole('textbox', { name: /IP Address/i }).first();
@@ -495,7 +493,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
 
       // Verify wlan0 is NOT marked as current connection (even though it has same IP)
       await page.getByRole('tab', { name: 'wlan0' }).click();
-      await expect(page.getByText('(current connection)')).not.toBeVisible();
+      await expect(page.getByText('This is your current connection')).not.toBeVisible();
 
       // Edit wlan0, verify rollback modal does NOT appear
       ipInput = page.getByRole('textbox', { name: /IP Address/i }).first();
@@ -515,7 +513,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
 
       // Verify eth1 also does NOT show rollback modal
       await page.getByRole('tab', { name: 'eth1' }).click();
-      await expect(page.getByText('(current connection)')).not.toBeVisible();
+      await expect(page.getByText('This is your current connection')).not.toBeVisible();
 
       ipInput = page.getByRole('textbox', { name: /IP Address/i }).first();
       await expect(ipInput).toHaveValue('10.0.0.50');
@@ -616,7 +614,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await expect(ipInput).toHaveValue('192.168.2.100'); // Original, not 192.168.2.88
     });
 
-    test('REGRESSION: online status updates with multiple adapters', async ({ page }) => {
+    test('online status updates with multiple adapters', async ({ page }) => {
       // Setup two adapters, both initially online
       await harness.setup(page, [
         {
@@ -677,7 +675,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await expect(page.locator('.v-chip').filter({ hasText: 'Offline' })).not.toBeVisible();
     });
 
-    test('REGRESSION: online status updates even with dirty form on multi-adapter', async ({ page }) => {
+    test('online status updates even with dirty form on multi-adapter', async ({ page }) => {
       // Setup two adapters, both initially online
       await harness.setup(page, [
         {
@@ -735,7 +733,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
         },
       ]);
 
-      // BUG: Online status should update even with dirty form
+      // Verify online status updates even when the form has unsaved changes
       await expect(page.locator('.v-chip').filter({ hasText: 'Offline' })).toBeVisible({ timeout: 5000 });
       await expect(page.locator('.v-chip').filter({ hasText: 'Online' })).not.toBeVisible();
 
@@ -743,7 +741,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
       await expect(ipInput).toHaveValue('192.168.1.150');
     });
 
-    test('BUG REPRODUCTION: online chip does not update when adapter goes offline', async ({ page }) => {
+    test('online chip updates when adapter goes offline', async ({ page }) => {
       // This test specifically checks the Online/Offline chip element by exact CSS classes
       await harness.setup(page, {
         online: true,
@@ -774,7 +772,7 @@ test.describe('Network Multi-Adapter Rollback Modal', () => {
         },
       }]);
 
-      // BUG: The chip should update to show Offline with red color
+      // Verify the chip updates to show Offline status
       await expect(offlineChip).toBeVisible({ timeout: 5000 });
       await expect(onlineChip).not.toBeVisible();
     });

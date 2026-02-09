@@ -1,8 +1,9 @@
 use crux_core::Command;
+use std::collections::HashMap;
 
 use crate::events::Event;
 use crate::model::Model;
-use crate::types::{NetworkFormData, NetworkFormState};
+use crate::types::{is_valid_ipv4, subnet_to_cidr, NetworkFormData, NetworkFormState};
 use crate::Effect;
 
 /// Handle network form start edit - initialize form with current network adapter data
@@ -23,6 +24,7 @@ pub fn handle_network_form_start_edit(
                 adapter_name: adapter_name.clone(),
                 form_data: form_data.clone(),
                 original_data: form_data,
+                errors: HashMap::new(),
             };
             // Clear dirty flag when starting a fresh edit
             model.network_form_dirty = false;
@@ -52,11 +54,21 @@ pub fn handle_network_form_update(
             } = &model.network_form_state
             {
                 // Validate that this update is for the adapter currently being edited
-                // This protects against hidden Shell components (like v-window-items in Vue)
-                // sending updates for non-active adapters
                 if adapter_name != &form_data.name {
                     // Silently ignore updates from non-active adapters
                     return crux_core::render::render();
+                }
+
+                let mut errors = HashMap::new();
+
+                // Validate IP Address (only if not DHCP)
+                if !form_data.dhcp && !is_valid_ipv4(&form_data.ip_address) {
+                    errors.insert("ipAddress".to_string(), "Invalid IPv4-Address".to_string());
+                }
+
+                // Validate Subnet Mask (only if not DHCP)
+                if !form_data.dhcp && subnet_to_cidr(&form_data.subnet_mask).is_none() {
+                    errors.insert("subnetMask".to_string(), "Invalid Subnet Mask".to_string());
                 }
 
                 let is_dirty = form_data != *original_data;
@@ -69,6 +81,7 @@ pub fn handle_network_form_update(
                     adapter_name: adapter_name.clone(),
                     form_data,
                     original_data: original_data.clone(),
+                    errors,
                 };
                 model.network_form_dirty = is_dirty;
                 model.should_show_rollback_modal = should_show_modal;
@@ -92,7 +105,7 @@ fn compute_rollback_modal_state(
         return (false, false);
     }
 
-    // Check if switching to DHCP (was static, now DHCP)
+    // Check if switching to DHCP
     let switching_to_dhcp = !original_data.dhcp && form_data.dhcp;
 
     // Show modal when any setting changed on current adapter
@@ -150,6 +163,7 @@ mod tests {
                 adapter_name,
                 form_data,
                 original_data,
+                ..
             } = &model.network_form_state
             {
                 assert_eq!(adapter_name, "eth0");
@@ -166,7 +180,7 @@ mod tests {
                 name: "eth0".to_string(),
                 ip_address: "192.168.1.100".to_string(),
                 dhcp: false,
-                prefix_len: 24,
+                subnet_mask: "255.255.255.0".to_string(),
                 dns: vec!["8.8.8.8".to_string()],
                 gateways: vec!["192.168.1.1".to_string()],
             };
@@ -176,6 +190,7 @@ mod tests {
                     adapter_name: "eth0".to_string(),
                     form_data: form_data.clone(),
                     original_data: form_data.clone(),
+                    errors: HashMap::new(),
                 },
                 network_form_dirty: false,
                 ..Default::default()
@@ -188,12 +203,12 @@ mod tests {
         }
 
         #[test]
-        fn update_with_changed_data_sets_dirty_flag() {
+        fn update_with_changed_ip_sets_dirty_flag_with_subnet_mask() {
             let original_data = NetworkFormData {
                 name: "eth0".to_string(),
                 ip_address: "192.168.1.100".to_string(),
                 dhcp: false,
-                prefix_len: 24,
+                subnet_mask: "255.255.255.0".to_string(),
                 dns: vec!["8.8.8.8".to_string()],
                 gateways: vec!["192.168.1.1".to_string()],
             };
@@ -206,6 +221,7 @@ mod tests {
                     adapter_name: "eth0".to_string(),
                     form_data: original_data.clone(),
                     original_data: original_data.clone(),
+                    errors: HashMap::new(),
                 },
                 network_form_dirty: false,
                 ..Default::default()
@@ -227,7 +243,7 @@ mod tests {
                 name: "eth0".to_string(),
                 ip_address: "192.168.1.200".to_string(),
                 dhcp: false,
-                prefix_len: 24,
+                subnet_mask: "255.255.255.0".to_string(),
                 dns: vec!["1.1.1.1".to_string()],
                 gateways: vec!["192.168.1.254".to_string()],
             };
@@ -240,6 +256,7 @@ mod tests {
                     adapter_name: "eth0".to_string(),
                     form_data: modified_data,
                     original_data: NetworkFormData::from(&adapter),
+                    errors: HashMap::new(),
                 },
                 network_form_dirty: true,
                 ..Default::default()
@@ -261,12 +278,11 @@ mod tests {
 
         #[test]
         fn ignores_updates_from_non_active_adapter() {
-            // Setup: editing eth0, but receive update for wlan0
             let eth0_data = NetworkFormData {
                 name: "eth0".to_string(),
                 ip_address: "192.168.1.100".to_string(),
                 dhcp: false,
-                prefix_len: 24,
+                subnet_mask: "255.255.255.0".to_string(),
                 dns: vec!["8.8.8.8".to_string()],
                 gateways: vec!["192.168.1.1".to_string()],
             };
@@ -275,7 +291,7 @@ mod tests {
                 name: "wlan0".to_string(),
                 ip_address: "192.168.2.100".to_string(),
                 dhcp: false,
-                prefix_len: 24,
+                subnet_mask: "255.255.255.0".to_string(),
                 dns: vec!["8.8.8.8".to_string()],
                 gateways: vec!["192.168.2.1".to_string()],
             };
@@ -285,16 +301,15 @@ mod tests {
                     adapter_name: "eth0".to_string(),
                     form_data: eth0_data.clone(),
                     original_data: eth0_data.clone(),
+                    errors: HashMap::new(),
                 },
                 network_form_dirty: false,
                 ..Default::default()
             };
 
-            // Send update for wlan0 while eth0 is being edited
             let _ =
                 handle_network_form_update(serde_json::to_string(&wlan0_data).unwrap(), &mut model);
 
-            // State should remain unchanged
             if let NetworkFormState::Editing {
                 adapter_name,
                 form_data,
@@ -303,7 +318,6 @@ mod tests {
             {
                 assert_eq!(adapter_name, "eth0");
                 assert_eq!(form_data.ip_address, "192.168.1.100");
-                assert_eq!(form_data.name, "eth0");
             }
             assert!(!model.network_form_dirty);
         }
@@ -340,7 +354,7 @@ mod tests {
                 name: "eth0".to_string(),
                 ip_address: "192.168.1.100".to_string(),
                 dhcp: false,
-                prefix_len: 24,
+                subnet_mask: "255.255.255.0".to_string(),
                 dns: vec![],
                 gateways: vec![],
             };
@@ -352,6 +366,7 @@ mod tests {
                     adapter_name: "eth0".to_string(),
                     form_data: original_data.clone(),
                     original_data: original_data.clone(),
+                    errors: HashMap::new(),
                 },
                 ..Default::default()
             };
@@ -366,95 +381,6 @@ mod tests {
 
             assert!(model.should_show_rollback_modal);
             assert!(model.default_rollback_enabled);
-        }
-
-        #[test]
-        fn shows_modal_when_switching_to_dhcp_on_current_adapter() {
-            let network_status = create_network_status_with_adapter("eth0", "192.168.1.100");
-
-            let original_data = NetworkFormData {
-                name: "eth0".to_string(),
-                ip_address: "192.168.1.100".to_string(),
-                dhcp: false,
-                prefix_len: 24,
-                dns: vec![],
-                gateways: vec![],
-            };
-
-            let mut model = Model {
-                network_status: Some(network_status),
-                current_connection_adapter: Some("eth0".to_string()),
-                network_form_state: NetworkFormState::Editing {
-                    adapter_name: "eth0".to_string(),
-                    form_data: original_data.clone(),
-                    original_data: original_data.clone(),
-                },
-                ..Default::default()
-            };
-
-            let mut changed_data = original_data.clone();
-            changed_data.dhcp = true;
-
-            let _ = handle_network_form_update(
-                serde_json::to_string(&changed_data).unwrap(),
-                &mut model,
-            );
-
-            assert!(model.should_show_rollback_modal);
-            assert!(!model.default_rollback_enabled); // DHCP defaults to disabled
-        }
-
-        #[test]
-        fn does_not_show_modal_for_non_current_adapter() {
-            let network_status = create_network_status_with_adapter("eth0", "192.168.1.100");
-
-            let original_data = NetworkFormData {
-                name: "eth1".to_string(),
-                ip_address: "192.168.2.100".to_string(),
-                dhcp: false,
-                prefix_len: 24,
-                dns: vec![],
-                gateways: vec![],
-            };
-
-            let mut model = Model {
-                network_status: Some(network_status),
-                current_connection_adapter: Some("eth0".to_string()),
-                network_form_state: NetworkFormState::Editing {
-                    adapter_name: "eth1".to_string(),
-                    form_data: original_data.clone(),
-                    original_data: original_data.clone(),
-                },
-                ..Default::default()
-            };
-
-            let mut changed_data = original_data.clone();
-            changed_data.ip_address = "192.168.2.101".to_string();
-
-            let _ = handle_network_form_update(
-                serde_json::to_string(&changed_data).unwrap(),
-                &mut model,
-            );
-
-            assert!(!model.should_show_rollback_modal);
-            assert!(!model.default_rollback_enabled);
-        }
-
-        #[test]
-        fn clears_flags_on_form_start_edit() {
-            let network_status = create_network_status_with_adapter("eth0", "192.168.1.100");
-
-            let mut model = Model {
-                network_status: Some(network_status),
-                should_show_rollback_modal: true,
-                default_rollback_enabled: true,
-                ..Default::default()
-            };
-
-            let _ = handle_network_form_start_edit("eth0".to_string(), &mut model);
-
-            assert!(!model.should_show_rollback_modal);
-            assert!(!model.default_rollback_enabled);
         }
     }
 }

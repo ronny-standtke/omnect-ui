@@ -2,6 +2,10 @@
 
 This repository implements a web frontend and backend to provide omnect specific features in a local environment, where the device might not be connected to the azure cloud.
 
+## Rules
+
+- Before committing any changes that affect the project structure, the "Project Structure" section in this file must be updated.
+
 ## 1. Architecture & Tech Stack
 
 The project uses a Cargo workspace structure and implements the Crux framework's Core/Shell architecture for the frontend.
@@ -88,12 +92,59 @@ cargo test --features mock
  ./scripts/run-e2e-tests.sh my-tests.spec.ts
 ```
 
+## UX Guidelines
+
+### Page Layout
+
+- Every page wraps content in `<v-sheet :border="true" rounded class="ma-4">`.
+- No page-level padding beyond `ma-4` on the sheet; inner spacing is handled per component.
+
+### Typography Hierarchy
+
+| Level | Class | Usage |
+| ----- | ----- | ----- |
+| Page section header | `text-h4 text-secondary border-b` | Top-level section titles ("Common Info", "Network") |
+| Sub-section header | `text-h5 text-secondary font-weight-bold border-b pb-2` | Secondary sections ("Commands", "Update Details") |
+| Category label | `text-subtitle-2 text-medium-emphasis mb-1` | Column/group labels ("Connectivity", "Version", "Provider") |
+
+### Data Display
+
+- Read-only data uses plain `<dt>`/`<dd>` pairs or the `KeyValuePair` component — no form fields, no icons.
+- Form fields that become read-only (e.g., DHCP-managed network fields) switch to `variant="plain"` to visually distinguish them from editable fields (`variant="outlined"`).
+
+### Icons
+
+- Do not add decorative icons to form field labels or data displays. Labels are self-explanatory.
+- Icons are reserved for **functional actions** (copy-to-clipboard, status indicators, navigation).
+
+### Buttons
+
+| Role | Variant | Color |
+| ---- | ------- | ----- |
+| Primary action | `variant="flat"` | `color="primary"` |
+| Destructive confirm | `variant="flat"` | `color="error"` |
+| Secondary / Cancel | `variant="text"` | `color="primary"` |
+
+### Dialogs
+
+- Confirmation dialogs use `v-card` with `v-card-title` (`text-h5`), `v-card-text`, and `v-card-actions`.
+- Actions are right-aligned (`<v-spacer>` before buttons).
+- Cancel is always `variant="text"`, confirm uses `variant="flat"`.
+
+### Redundancy
+
+- Do not display the same information twice in different components. Choose the most informative presentation and remove the redundant one.
+
 ## Project Structure
 
 ```text
 omnect-ui/
 ├── Cargo.toml                    # Workspace root
-├── dist/                         # Built frontend assets (gitignored)
+├── Dockerfile                    # Multi-stage Docker build
+├── scripts/                      # Build and test scripts
+│   ├── build-frontend.sh         # Build WASM + Types + UI
+│   ├── build-and-deploy-image.sh # Docker build and deploy
+│   └── run-e2e-tests.sh          # Playwright test runner
 ├── src/
 │   ├── app/                      # Crux Core (business logic)
 │   │   ├── Cargo.toml
@@ -101,57 +152,97 @@ omnect-ui/
 │   │       ├── lib.rs            # App struct, Effect enum, re-exports
 │   │       ├── model.rs          # Model struct (application state)
 │   │       ├── events.rs         # Event enum
-│   │       ├── types/            # Domain types (organized by domain)
-│   │       │   ├── mod.rs        # Module re-exports
-│   │       │   ├── auth.rs       # Authentication types
-│   │       │   ├── device.rs     # Device information types
-│   │       │   ├── network.rs    # Network configuration types
-│   │       │   ├── factory_reset.rs  # Factory reset types
-│   │       │   ├── update.rs     # Update validation types
-│   │       │   └── common.rs     # Common shared types
-│   │       ├── wasm.rs           # WASM bindings
-│   │       ├── commands/         # Custom command implementations
+│   │       ├── wasm.rs           # WASM FFI bindings
+│   │       ├── macros.rs         # URL and log macros
+│   │       ├── http_helpers.rs   # HTTP request utilities
+│   │       ├── commands/         # Custom side-effect commands
 │   │       │   ├── mod.rs
 │   │       │   └── centrifugo.rs # Centrifugo WebSocket commands
+│   │       ├── types/            # Domain types
+│   │       │   ├── mod.rs
+│   │       │   ├── auth.rs       # Authentication types
+│   │       │   ├── common.rs     # Common shared types
+│   │       │   ├── device.rs     # Device information types
+│   │       │   ├── network.rs    # Network configuration types
+│   │       │   ├── ods.rs        # ODS-specific DTOs
+│   │       │   ├── factory_reset.rs
+│   │       │   └── update.rs     # Update validation types
 │   │       └── update/           # Domain-based event handlers
 │   │           ├── mod.rs        # Main dispatcher
 │   │           ├── auth.rs       # Auth event handlers
 │   │           ├── ui.rs         # UI state handlers
 │   │           ├── websocket.rs  # WebSocket state handlers
 │   │           └── device/       # Device domain handlers
+│   │               ├── mod.rs
+│   │               ├── operations.rs # Reboot/Factory Reset logic
+│   │               ├── reconnection.rs # Device reconnection polling
+│   │               └── network/    # Network configuration logic
 │   ├── backend/                  # Rust backend (Actix-web)
 │   │   ├── Cargo.toml
 │   │   ├── src/
-│   │   │   ├── services/         # Business logic services
-│   │   │   ├── api.rs            # API route handlers
-│   │   │   ├── middleware.rs     # Auth and other middleware
-│   │   │   ├── config.rs         # Configuration loading
 │   │   │   ├── main.rs           # Application entry point
-│   │   │   └── keycloak_client.rs # Keycloak OIDC integration
-│   │   ├── tests/                # Integration tests
-│   │   └── config/               # Centrifugo config
+│   │   │   ├── api.rs            # API route handlers
+│   │   │   ├── middleware.rs     # Auth middleware
+│   │   │   ├── config.rs         # Configuration loading
+│   │   │   ├── http_client.rs    # Internal HTTP client
+│   │   │   ├── keycloak_client.rs
+│   │   │   ├── omnect_device_service_client.rs
+│   │   │   └── services/         # Business logic services
+│   │   │       ├── mod.rs
+│   │   │       ├── certificate.rs
+│   │   │       ├── firmware.rs
+│   │   │       ├── network.rs
+│   │   │       └── auth/         # Auth logic
+│   │   │           ├── mod.rs
+│   │   │           ├── authorization.rs # JWT/SSO validation
+│   │   │           ├── password.rs      # Password hashing/storage
+│   │   │           └── token.rs         # JWT generation
+│   │   └── tests/                # Integration tests
 │   ├── shared_types/             # TypeGen for TypeScript bindings
 │   │   ├── Cargo.toml
 │   │   ├── build.rs              # TypeGen build script
 │   │   └── generated/            # Generated TypeScript types
-│   │       └── typescript/
-│   │           ├── types/        # Domain types
-│   │           ├── bincode/      # Serialization
-│   │           └── serde/        # De/serialization helpers
 │   └── ui/                       # Vue 3 Shell
 │       ├── package.json
-│       └── src/
-│           ├── assets/           # Static assets (images, icons)
-│           ├── components/       # Vue components (UI blocks)
-│           ├── composables/      # Vue composables (logic & WASM bridge)
-│           │   ├── useCore.ts    # Core WASM bridge + effect handlers
-│           │   └── useCentrifugo.ts # WebSocket client
-│           ├── pages/            # View components (routes)
-│           ├── plugins/          # Vue plugins (Vuetify, Router)
-│           ├── core/pkg/         # WASM package (gitignored)
-│           └── types/            # UI-specific types
-├── scripts/                      # Build and test scripts
-├── Dockerfile                    # Multi-stage Docker build
+│       ├── playwright.config.ts  # E2E test configuration
+│       ├── src/
+│       │   ├── App.vue           # Root component
+│       │   ├── main.ts           # UI entry point
+│       │   ├── components/       # UI components
+│       │   ├── composables/      # Logic & WASM bridge
+│       │   │   ├── useCore.ts    # Main bridge + effect handlers
+│       │   │   ├── useCentrifugo.ts
+│       │   │   └── core/         # Modular Core integration
+│       │   │       ├── index.ts  # Main entry point
+│       │   │       ├── state.ts  # Singleton reactive state
+│       │   │       ├── types.ts  # TypeScript type conversions
+│       │   │       ├── effects.ts # Effect processing
+│       │   │       ├── http.ts   # HTTP capability
+│       │   │       ├── centrifugo.ts # WebSocket capability
+│       │   │       ├── timers.ts # Timer/Polling logic
+│       │   │       └── sync.ts   # ViewModel synchronization
+│       │   ├── pages/            # Route components
+│       │   │   ├── DeviceOverview.vue
+│       │   │   ├── DeviceUpdate.vue
+│       │   │   ├── Network.vue
+│       │   │   ├── Login.vue
+│       │   │   ├── SetPassword.vue
+│       │   │   ├── UpdatePassword.vue
+│       │   │   └── Callback.vue
+│       │   ├── plugins/          # Router, Vuetify
+│       │   └── types/            # UI-specific types
+│       └── tests/                # Playwright E2E tests
+│           ├── auth.spec.ts
+│           ├── device.spec.ts
+│           ├── error-handling.spec.ts
+│           ├── factory-reset.spec.ts
+│           ├── network-configuration.spec.ts
+│           ├── network-multi-adapter.spec.ts
+│           ├── reboot.spec.ts
+│           ├── smoke.spec.ts
+│           ├── update.spec.ts
+│           ├── version-mismatch.spec.ts
+│           └── fixtures/
 └── project-context.md            # This file
 ```
 

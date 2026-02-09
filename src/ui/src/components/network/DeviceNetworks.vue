@@ -13,11 +13,11 @@ const showUnsavedChangesDialog = ref(false)
 const pendingTab = ref<string | null>(null)
 const isReverting = ref(false)
 
-const networkStatus = computed(() => viewModel.network_status)
+const networkStatus = computed(() => viewModel.networkStatus)
 
 // Use Core's computed current connection adapter
 const isCurrentConnection = (adapter: any) => {
-  return viewModel.current_connection_adapter === adapter.name
+  return viewModel.currentConnectionAdapter === adapter.name
 }
 
 // Watch for tab changes and check for unsaved changes
@@ -31,7 +31,7 @@ watch(tab, (newTab, oldTab) => {
   }
 
   // Check if there are unsaved changes
-  if (viewModel.network_form_dirty && oldTab !== null) {
+  if (viewModel.networkFormDirty && oldTab !== null) {
     // Block the tab change and show confirmation dialog
     showUnsavedChangesDialog.value = true
     pendingTab.value = newTab as string
@@ -47,8 +47,8 @@ watch(tab, (newTab, oldTab) => {
 const confirmTabChange = () => {
   if (pendingTab.value !== null) {
     // User confirmed, discard changes and switch tabs
-    const currentAdapter = viewModel.network_form_state?.type === 'editing'
-      ? (viewModel.network_form_state as any).adapter_name
+    const currentAdapter = viewModel.networkFormState?.type === 'editing'
+      ? (viewModel.networkFormState as any).adapterName
       : null
 
     if (currentAdapter) {
@@ -79,12 +79,23 @@ const cancelTabChange = () => {
       <div class="text-h4 text-secondary">Network</div>
     </div>
     <div class="d-flex flex-row">
-      <v-tabs v-model="tab" color="primary" direction="vertical">
-        <v-tab v-for="networkAdapter in networkStatus?.network_status" :text="networkAdapter.name"
-          :value="networkAdapter.name"></v-tab>
+      <v-tabs v-model="tab" color="primary" direction="vertical" class="border-r network-tabs">
+        <v-tab v-for="networkAdapter in networkStatus?.networkStatus" :value="networkAdapter.name" class="text-none">
+          <div class="d-flex align-center w-100 py-2">
+            <v-icon 
+              :icon="networkAdapter.online ? 'mdi-circle' : 'mdi-circle-outline'" 
+              :color="networkAdapter.online ? 'success' : 'grey-lighten-1'"
+              size="x-small" 
+              class="mr-3"
+            ></v-icon>
+            <span class="font-weight-medium">{{ networkAdapter.name }}</span>
+            <v-spacer></v-spacer>
+            <v-icon v-if="isCurrentConnection(networkAdapter)" icon="mdi-account-network" size="x-small" color="info" class="ml-3" title="Current Connection"></v-icon>
+          </div>
+        </v-tab>
       </v-tabs>
-      <v-window v-model="tab" class="w[20vw]" direction="vertical">
-        <v-window-item v-for="networkAdapter in networkStatus?.network_status" :key="networkAdapter.name" :value="networkAdapter.name">
+      <v-window v-model="tab" class="flex-grow-1" direction="vertical">
+        <v-window-item v-for="networkAdapter in networkStatus?.networkStatus" :key="networkAdapter.name" :value="networkAdapter.name">
           <NetworkSettings :networkAdapter="networkAdapter" :isCurrentConnection="isCurrentConnection(networkAdapter)" />
         </v-window-item>
       </v-window>
@@ -99,10 +110,16 @@ const cancelTabChange = () => {
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <v-btn color="primary" text @click="cancelTabChange">Cancel</v-btn>
-          <v-btn color="error" text @click="confirmTabChange" data-cy="network-confirm-discard-button">Discard Changes</v-btn>
+          <v-btn color="primary" variant="text" @click="cancelTabChange">Cancel</v-btn>
+          <v-btn color="error" variant="text" @click="confirmTabChange" data-cy="network-confirm-discard-button">Discard Changes</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
   </div>
 </template>
+
+<style scoped>
+.network-tabs {
+  min-width: 180px;
+}
+</style>

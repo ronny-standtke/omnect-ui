@@ -9,12 +9,6 @@
  *
  * The generated types from shared_types provide serialization/deserialization
  * for bincode FFI communication with the WASM module.
- *
- * Build the WASM module with:
- *   cd src/app && wasm-pack build --target web --out-dir ../ui/src/core/pkg
- *
- * Generate TypeScript types with:
- *   export PATH="$HOME/.local/share/pnpm:$PATH" && cargo build -p shared_types
  */
 
 import { readonly, type DeepReadonly } from 'vue'
@@ -68,6 +62,8 @@ import {
 	DeviceEventVariantNetworkFormUpdate,
 	DeviceEventVariantNetworkFormReset,
 	DeviceEventVariantAckRollback,
+	DeviceEventVariantAckFactoryResetResult,
+	DeviceEventVariantAckUpdateValidation,
 	WebSocketEventVariantSubscribeToChannels,
 	WebSocketEventVariantUnsubscribeFromChannels,
 	UiEventVariantClearError,
@@ -96,6 +92,7 @@ export type {
 	CoreViewModel,
 	UpdateManifest,
 	NetworkFormData,
+	DeviceNetwork,
 } from './types'
 
 export { NetworkConfigRequest } from './types'
@@ -173,8 +170,6 @@ async function initializeCore(): Promise<void> {
 
 		try {
 			// Dynamically import the WASM module
-			// This will be available after running:
-			// cd src/app && wasm-pack build --target web --out-dir ../ui/src/core/pkg
 			const wasm = await import('../../core/pkg/omnect_ui_core')
 			await wasm.default()
 			setWasmModule(wasm)
@@ -230,7 +225,7 @@ async function initializeCore(): Promise<void> {
  * })
  *
  * // Access reactive view model
- * const isOnline = computed(() => viewModel.online_status?.iothub ?? false)
+ * const isOnline = computed(() => viewModel.onlineStatus?.iothub ?? false)
  *
  * // Send events using convenience methods
  * login('password')
@@ -296,5 +291,9 @@ export function useCore() {
 			sendEventToCore(new EventVariantDevice(new DeviceEventVariantNetworkFormReset(adapterName))),
 		ackRollback: () =>
 			sendEventToCore(new EventVariantDevice(new DeviceEventVariantAckRollback())),
+		ackFactoryResetResult: () =>
+			sendEventToCore(new EventVariantDevice(new DeviceEventVariantAckFactoryResetResult())),
+		ackUpdateValidation: () =>
+			sendEventToCore(new EventVariantDevice(new DeviceEventVariantAckUpdateValidation())),
 	}
 }

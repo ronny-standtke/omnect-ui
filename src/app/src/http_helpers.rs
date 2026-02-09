@@ -3,11 +3,11 @@
 //! This module extracts common HTTP response handling logic from macros
 //! into debuggable, testable functions.
 
-use crux_http::Response;
+use crux_http::{HttpError, Response};
 
 /// Base URL for omnect-device API endpoints.
 ///
-/// NOTE: This is a dummy prefix required because `crux_http` (v0.16.0-rc2) requires
+/// NOTE: This is a prefix required because `crux_http` requires
 /// absolute URLs and rejects relative paths (`RelativeUrlWithoutBase` error).
 /// The UI shell (`http.ts`) strips this prefix before sending requests via `fetch()`,
 /// making them relative to avoid HTTPS certificate CN/SAN validation issues.
@@ -20,7 +20,7 @@ pub const BASE_URL: &str = "https://relative";
 /// * `endpoint` - The API endpoint path (e.g., "/api/device/reboot")
 ///
 /// # Returns
-/// A string containing the full URL with dummy prefix
+/// A string containing the full URL with prefix
 ///
 /// # Example
 /// ```
@@ -39,22 +39,26 @@ pub fn is_response_success(response: &Response<Vec<u8>>) -> bool {
     response.status().is_success()
 }
 
-/// Extracts error message from HTTP response.
+/// Extracts error message from successful HTTP response.
+///
+/// This is used when an API returns a 2xx status but indicates failure in the body,
+/// or when manually processing non-2xx responses that were not caught as Errors by crux_http.
 pub fn extract_error_message(action: &str, response: &mut Response<Vec<u8>>) -> String {
-    let status = response.status().to_string();
+    let status = response.status();
+    let status_str = status.to_string();
 
     match response.take_body() {
         Some(body) => {
             if body.is_empty() {
-                format!("{action} failed: HTTP {status} (Empty body)")
+                format!("{action} failed: HTTP {status_str} (Empty body)")
             } else {
                 match String::from_utf8(body) {
-                    Ok(msg) => format!("Error: {msg}"),
-                    Err(e) => format!("{action} failed: HTTP {status} (Invalid UTF-8: {e})"),
+                    Ok(msg) => msg,
+                    Err(e) => format!("{action} failed: HTTP {status_str} (Invalid UTF-8: {e})"),
                 }
             }
         }
-        None => format!("{action} failed: HTTP {status} (No body)"),
+        None => format!("{action} failed: HTTP {status_str} (No body)"),
     }
 }
 
@@ -114,7 +118,7 @@ pub fn process_status_response(
 ) -> Result<(), String> {
     match result {
         Ok(mut response) => check_response_status(action, &mut response),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(map_http_error(action, e)),
     }
 }
 
@@ -125,7 +129,20 @@ pub fn process_json_response<T: serde::de::DeserializeOwned>(
 ) -> Result<T, String> {
     match result {
         Ok(mut response) => parse_json_response(action, &mut response),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(map_http_error(action, e)),
+    }
+}
+
+pub fn map_http_error(action: &str, e: HttpError) -> String {
+    match e {
+        HttpError::Http {
+            body: Some(ref body),
+            ..
+        } => match String::from_utf8(body.clone()) {
+            Ok(msg) => msg,
+            Err(_) => format!("{action} failed: {e}"),
+        },
+        _ => format!("{action} failed: {e}"),
     }
 }
 
@@ -158,7 +175,12 @@ where
     crux_core::render::render()
 }
 
-// Note: Unit tests for these helpers are not included because crux_http::Response
-// has a private constructor. These functions are integration-tested through the
-// macros that use them. If crux_http provides a test utility for constructing
-// Response objects in the future, we can add unit tests here.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_url() {
+        assert_eq!(build_url("/test"), "https://relative/test");
+    }
+}

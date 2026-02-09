@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Operating system information
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct OsInfo {
     pub name: String,
     pub version: String,
@@ -9,6 +10,7 @@ pub struct OsInfo {
 
 /// System information from WebSocket
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct SystemInfo {
     pub os: OsInfo,
     pub azure_sdk_version: String,
@@ -18,12 +20,14 @@ pub struct SystemInfo {
 
 /// Online status from WebSocket
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct OnlineStatus {
     pub iothub: bool,
 }
 
 /// Duration type for timeouts
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Duration {
     pub nanos: u32,
     pub secs: u64,
@@ -31,12 +35,14 @@ pub struct Duration {
 
 /// Timeout configurations from WebSocket
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Timeouts {
     pub wait_online_timeout: Duration,
 }
 
 /// Overlay spinner state (UI state)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct OverlaySpinnerState {
     overlay: bool,
     title: String,

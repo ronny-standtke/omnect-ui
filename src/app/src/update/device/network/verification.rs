@@ -77,8 +77,7 @@ pub fn handle_new_ip_check_tick(model: &mut Model) -> Command<Effect, Event> {
             // If switching to DHCP, we don't know the new IP, so we can't poll it.
             // We just wait for the timeout (rollback) or for the user to manually navigate.
             if !*switching_to_dhcp {
-                // Try to reach the new IP (silent GET - no error shown on failure)
-                // Use HTTPS since the server only listens on HTTPS
+                // Try to reach the new IP
                 let url = format!("https://{new_ip}:{ui_port}/healthcheck");
                 http_get_silent!(
                     url,
@@ -124,7 +123,6 @@ pub fn handle_new_ip_check_timeout(model: &mut Model) -> Command<Effect, Event> 
         ..
     } = &model.network_change_state
     {
-        // If rollback was enabled (timeout > 0), we assume rollback happened on device
         if *rollback_timeout_seconds > 0 {
             model.network_change_state = NetworkChangeState::WaitingForOldIp {
                 old_ip: old_ip.clone(),
@@ -155,6 +153,36 @@ pub fn handle_new_ip_check_timeout(model: &mut Model) -> Command<Effect, Event> 
     crux_core::render::render()
 }
 
+/// Handle acknowledge factory reset result - clear the result
+pub fn handle_ack_factory_reset_result(model: &mut Model) -> Command<Effect, Event> {
+    if let Some(factory_reset) = &mut model.factory_reset {
+        factory_reset.result = None;
+    }
+
+    unauth_post!(
+        Device,
+        DeviceEvent,
+        model,
+        "/ack-factory-reset-result",
+        AckFactoryResetResultResponse,
+        "Acknowledge factory reset result"
+    )
+}
+
+/// Handle acknowledge update validation - clear the status
+pub fn handle_ack_update_validation(model: &mut Model) -> Command<Effect, Event> {
+    model.update_validation_status = None;
+
+    unauth_post!(
+        Device,
+        DeviceEvent,
+        model,
+        "/ack-update-validation",
+        AckUpdateValidationResponse,
+        "Acknowledge update validation"
+    )
+}
+
 /// Handle acknowledge network rollback - clear the rollback occurred flag
 pub fn handle_ack_rollback(model: &mut Model) -> Command<Effect, Event> {
     // Clear the rollback status in the model
@@ -163,8 +191,6 @@ pub fn handle_ack_rollback(model: &mut Model) -> Command<Effect, Event> {
     }
 
     // Send POST request to backend to clear the marker file
-    // Note: Using unauth_post instead of auth_post because this may be called before login
-    // (the rollback notification appears in App.vue onMounted, before authentication)
     unauth_post!(
         Device,
         DeviceEvent,
@@ -199,7 +225,6 @@ mod tests {
 
             let _ = handle_new_ip_check_tick(&mut model);
 
-            // Verify attempt counter was incremented
             if let NetworkChangeState::WaitingForNewIp { attempt, .. } = model.network_change_state
             {
                 assert_eq!(attempt, 1);
@@ -316,6 +341,7 @@ mod tests {
                     status: "valid".to_string(),
                 },
                 network_rollback_occurred: false,
+                ..Default::default()
             };
 
             let _ = crate::update::device::handle(
@@ -334,15 +360,8 @@ mod tests {
         fn clears_rollback_flag_in_healthcheck() {
             let mut model = Model {
                 healthcheck: Some(HealthcheckInfo {
-                    version_info: VersionInfo {
-                        required: "1.0.0".to_string(),
-                        current: "1.0.0".to_string(),
-                        mismatch: false,
-                    },
-                    update_validation_status: UpdateValidationStatus {
-                        status: "valid".to_string(),
-                    },
                     network_rollback_occurred: true,
+                    ..Default::default()
                 }),
                 ..Default::default()
             };
@@ -388,6 +407,123 @@ mod tests {
 
             let _ = crate::update::device::handle(
                 DeviceEvent::AckRollbackResponse(Err("Failed to acknowledge rollback".to_string())),
+                &mut model,
+            );
+
+            assert!(!model.is_loading);
+            assert!(model.error_message.is_some());
+        }
+    }
+
+    mod factory_reset_result_acknowledgment {
+        use super::*;
+        use crate::types::{FactoryReset, FactoryResetResult, FactoryResetStatus};
+
+        #[test]
+        fn clears_factory_reset_result_in_model() {
+            let mut model = Model {
+                factory_reset: Some(FactoryReset {
+                    keys: vec!["key1".to_string()],
+                    result: Some(FactoryResetResult {
+                        status: FactoryResetStatus::ModeSupported,
+                        context: None,
+                        error: String::new(),
+                        paths: vec![],
+                    }),
+                }),
+                ..Default::default()
+            };
+
+            let _ = handle_ack_factory_reset_result(&mut model);
+
+            assert!(model.factory_reset.as_ref().unwrap().result.is_none());
+        }
+
+        #[test]
+        fn handles_missing_factory_reset_gracefully() {
+            let mut model = Model {
+                factory_reset: None,
+                ..Default::default()
+            };
+
+            let _ = handle_ack_factory_reset_result(&mut model);
+
+            assert!(model.factory_reset.is_none());
+        }
+
+        #[test]
+        fn response_ok_stops_loading() {
+            let mut model = Model {
+                is_loading: true,
+                ..Default::default()
+            };
+
+            let _ = crate::update::device::handle(
+                DeviceEvent::AckFactoryResetResultResponse(Ok(())),
+                &mut model,
+            );
+
+            assert!(!model.is_loading);
+        }
+
+        #[test]
+        fn response_error_sets_error_message() {
+            let mut model = Model {
+                is_loading: true,
+                ..Default::default()
+            };
+
+            let _ = crate::update::device::handle(
+                DeviceEvent::AckFactoryResetResultResponse(Err("Failed".to_string())),
+                &mut model,
+            );
+
+            assert!(!model.is_loading);
+            assert!(model.error_message.is_some());
+        }
+    }
+
+    mod update_validation_acknowledgment {
+        use super::*;
+
+        #[test]
+        fn clears_update_validation_status_in_model() {
+            let mut model = Model {
+                update_validation_status: Some(UpdateValidationStatus {
+                    status: "Succeeded".to_string(),
+                }),
+                ..Default::default()
+            };
+
+            let _ = handle_ack_update_validation(&mut model);
+
+            assert!(model.update_validation_status.is_none());
+        }
+
+        #[test]
+        fn response_ok_stops_loading() {
+            let mut model = Model {
+                is_loading: true,
+                ..Default::default()
+            };
+
+            let _ = crate::update::device::handle(
+                DeviceEvent::AckUpdateValidationResponse(Ok(())),
+                &mut model,
+            );
+
+            assert!(!model.is_loading);
+        }
+
+        #[test]
+        fn response_error_sets_error_message() {
+            let mut model = Model {
+                is_loading: true,
+                ..Default::default()
+            };
+
+            let _ = crate::update::device::handle(
+                DeviceEvent::AckUpdateValidationResponse(Err("Failed".to_string())),
                 &mut model,
             );
 

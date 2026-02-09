@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
 	overlay: boolean
 	title: string
 	text?: string
 	timedOut: boolean
 	progress?: number
 	countdownSeconds?: number
+	countdownLabel?: string
 	redirectUrl?: string
-}>()
+}>(), {
+	countdownLabel: 'Time remaining:',
+})
 
 const refresh = () => {
 	window.location.reload()
@@ -49,13 +52,13 @@ const formattedCountdown = computed(() => {
 				</v-progress-circular>
 				<p class="text-h6 m-t-4">{{ props.text }}</p>
 				<div v-if="formattedCountdown" class="flex flex-col items-center gap-2">
-					<div class="text-subtitle-1 text-medium-emphasis">Automatic rollback in:</div>
+					<div class="text-subtitle-1 text-medium-emphasis">{{ props.countdownLabel }}</div>
 					<div class="text-h5 text-primary font-mono">
 						{{ formattedCountdown }}
 					</div>
 				</div>
 				<v-btn v-if="props.redirectUrl" color="primary" @click="navigateToRedirectUrl">
-					Open new address in new tab
+					Open app in new tab
 				</v-btn>
 				<v-btn v-if="props.timedOut" text="Refresh" @click="refresh" />
 			</v-sheet>

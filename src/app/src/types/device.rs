@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// State of long-running device operations (reboot, factory reset, update)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum DeviceOperationState {
     #[default]
     Idle,

@@ -19,3 +19,6 @@ src/ui/src/core/pkg/
 *.md
 !README.md
 !project-context.md
+
+# any scripts not in scripts/ dir
+*.sh

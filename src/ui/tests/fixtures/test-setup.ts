@@ -14,7 +14,9 @@ export async function setupAndLogin(page: Page) {
       body: JSON.stringify({
           version_info: { current: '1.0.0', required: '1.0.0', mismatch: false },
           update_validation_status: { status: 'NoUpdate' },
-          network_rollback_occurred: false
+          network_rollback_occurred: false,
+          factory_reset_result_acked: true,
+          update_validation_acked: true
       })
     });
   });

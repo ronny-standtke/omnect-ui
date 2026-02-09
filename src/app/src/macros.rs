@@ -19,24 +19,32 @@
 macro_rules! update_field {
     // Multiple field updates (must come first to match the pattern)
     ($($model_field:expr, $value:expr);+ $(;)?) => {{
+        let mut changed = false;
         $(
-            $model_field = $value;
+            let value = $value;
+            if $model_field != value {
+                $model_field = value;
+                changed = true;
+            }
         )+
-        crux_core::render::render()
+        if changed {
+            crux_core::render::render()
+        } else {
+            crux_core::Command::done()
+        }
     }};
 
     // Single field update
     ($model_field:expr, $value:expr) => {{
-        $model_field = $value;
-        crux_core::render::render()
+        update_field!($model_field, $value;)
     }};
 }
 
 // Re-export http_helpers functions for macro use
 pub use crate::http_helpers::{
     build_url, check_response_status, extract_error_message, extract_string_response,
-    handle_auth_error, handle_request_error, is_response_success, parse_json_response,
-    process_json_response, process_status_response, BASE_URL,
+    handle_auth_error, handle_request_error, is_response_success, map_http_error,
+    parse_json_response, process_json_response, process_status_response, BASE_URL,
 };
 
 /// Macro for unauthenticated POST requests with standard error handling.
@@ -71,6 +79,13 @@ pub use crate::http_helpers::{
 ///     expect_json: bool
 /// )
 /// ```
+///
+/// Pattern 4: POST with JSON body, extract string response with map
+/// ```ignore
+/// unauth_post!(Auth, AuthEvent, model, "/set-password", SetPasswordResponse, "Set password",
+///     body_json: &request,
+///     map: |token| AuthToken { token })
+/// ```
 #[macro_export]
 macro_rules! unauth_post {
     // Pattern 0: Simple POST without body (status only)
@@ -102,7 +117,7 @@ macro_rules! unauth_post {
                 builder.build().then_send(|result| {
                     let event_result: Result<$response_type, String> = match result {
                         Ok(mut response) => $crate::parse_json_response($action, &mut response),
-                        Err(e) => Err(e.to_string()),
+                        Err(e) => Err($crate::map_http_error($action, e)),
                     };
                     $crate::events::Event::$domain($crate::events::$domain_event::$response_event(
                         event_result,
@@ -127,7 +142,7 @@ macro_rules! unauth_post {
                 builder.build().then_send(|result| {
                     let event_result = match result {
                         Ok(mut response) => $crate::check_response_status($action, &mut response),
-                        Err(e) => Err(e.to_string()),
+                        Err(e) => Err($crate::map_http_error($action, e)),
                     };
                     $crate::events::Event::$domain($crate::events::$domain_event::$response_event(
                         event_result,
@@ -140,7 +155,34 @@ macro_rules! unauth_post {
         }
     }};
 
-    // Pattern 3: GET expecting JSON response
+    // Pattern 4: POST with JSON body, extract string response with map
+    ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, body_json: $body:expr, map: $mapper:expr) => {{
+        $model.start_loading();
+        match $crate::HttpCmd::post($crate::build_url($endpoint))
+            .header("Content-Type", "application/json")
+            .body_json($body)
+        {
+            Ok(builder) => crux_core::Command::all([
+                crux_core::render::render(),
+                builder.build().then_send(|result| {
+                    let event_result = match result {
+                        Ok(mut response) => {
+                            $crate::extract_string_response($action, &mut response).map($mapper)
+                        }
+                        Err(e) => Err($crate::map_http_error($action, e)),
+                    };
+                    $crate::events::Event::$domain($crate::events::$domain_event::$response_event(
+                        event_result,
+                    ))
+                }),
+            ]),
+            Err(e) => {
+                $model.set_error_and_render(format!("Failed to create {} request: {}", $action, e))
+            }
+        }
+    }};
+
+    // Pattern 5: GET expecting JSON response
     ($domain:ident, $domain_event:ident, $model:expr, $endpoint:expr, $response_event:ident, $action:expr, method: get, expect_json: $response_type:ty) => {{
         $model.start_loading();
         crux_core::Command::all([
@@ -150,7 +192,7 @@ macro_rules! unauth_post {
                 .then_send(|result| {
                     let event_result: Result<$response_type, String> = match result {
                         Ok(mut response) => $crate::parse_json_response($action, &mut response),
-                        Err(e) => Err(e.to_string()),
+                        Err(e) => Err($crate::map_http_error($action, e)),
                     };
                     $crate::events::Event::$domain($crate::events::$domain_event::$response_event(
                         event_result,
@@ -165,7 +207,7 @@ macro_rules! unauth_post {
 /// Used for login endpoint which requires Basic auth instead of Bearer token.
 /// Returns string body (e.g., auth token) on success, with optional conversion to target type.
 ///
-/// NOTE: URLs are prefixed with `https://relative` (dummy host) as a workaround.
+/// NOTE: URLs are prefixed with `https://relative`.
 /// `crux_http` requires absolute URLs and rejects relative paths.
 /// The UI shell (`http.ts`) strips this prefix before sending requests.
 ///
@@ -189,7 +231,7 @@ macro_rules! auth_post_basic {
                         Ok(mut response) => {
                             $crate::extract_string_response($action, &mut response).map($mapper)
                         }
-                        Err(e) => Err(e.to_string()),
+                        Err(e) => Err($crate::map_http_error($action, e)),
                     };
                     $crate::events::Event::$domain($crate::events::$domain_event::$response_event(
                         event_result,
@@ -202,10 +244,9 @@ macro_rules! auth_post_basic {
 /// Macro for authenticated POST requests with standard error handling.
 /// Reduces boilerplate for POST requests that require authentication.
 ///
-/// NOTE: URLs are prefixed with `https://relative` (dummy host) as a workaround.
+/// NOTE: URLs are prefixed with `https://relative`.
 /// `crux_http` requires absolute URLs and rejects relative paths.
 /// The UI shell (`http.ts`) strips this prefix before sending requests.
-/// This workaround should be removed once `crux_http` supports relative URLs gracefully.
 ///
 /// # Patterns
 ///
@@ -228,7 +269,7 @@ macro_rules! auth_post_basic {
 /// )
 /// ```
 ///
-/// NOTE: The macro now requires a domain parameter to specify the event wrapper.
+/// NOTE: The macro requires a domain parameter to specify the event wrapper.
 /// Examples:
 /// - Auth domain: `auth_post!(Auth, AuthEvent, model, "/logout", LogoutResponse, "Logout")`
 /// - Device domain: `auth_post!(Device, DeviceEvent, model, "/reboot", RebootResponse, "Reboot")`
@@ -382,7 +423,6 @@ macro_rules! http_get {
 /// Silent HTTP GET - no loading state, custom success/error event handlers.
 ///
 /// Used for background polling where failures should not show errors to user.
-/// Does NOT check for shell hack header (since success returns custom event anyway).
 ///
 /// # Example
 /// ```ignore
@@ -401,6 +441,47 @@ macro_rules! http_get_silent {
                 Ok(response) if response.status().is_success() => $success_event,
                 _ => $error_event,
             })
+    };
+}
+
+/// Macro for parsing ODS WebSocket updates with standard error handling.
+///
+/// # Patterns
+///
+/// Pattern 1: Simple field update with `.into()` mapping
+/// ```ignore
+/// parse_ods_update!(model, json, OdsSystemInfo, system_info, "SystemInfo")
+/// ```
+///
+/// Pattern 2: Custom success handler
+/// ```ignore
+/// parse_ods_update!(model, json, OdsNetworkStatus, "NetworkStatus", |m, status| {
+///     m.network_status = Some(status.into());
+///     m.update_current_connection_adapter();
+///     crux_core::render::render()
+/// })
+/// ```
+#[macro_export]
+macro_rules! parse_ods_update {
+    // Pattern 1: Simple field update with .into()
+    ($model:expr, $json:expr, $ods_type:ty, $field:ident, $label:expr) => {
+        parse_ods_update!($model, $json, $ods_type, $label, |m, data| {
+            $crate::update_field!(m.$field, Some(data.into()))
+        })
+    };
+
+    // Pattern 2: Custom success handler
+    ($model:expr, $json:expr, $ods_type:ty, $label:expr, |$m:ident, $data:ident| $success_body:block) => {
+        match serde_json::from_str::<$ods_type>(&$json) {
+            Ok($data) => {
+                let $m = $model;
+                $success_body
+            }
+            Err(e) => {
+                log::error!("Failed to parse {}: {e}. JSON: {}", $label, $json);
+                $model.set_error_and_render(format!("Failed to parse {}: {e}", $label))
+            }
+        }
     };
 }
 

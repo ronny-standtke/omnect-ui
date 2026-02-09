@@ -33,22 +33,24 @@ argon2 = { version = "0.5", default-features = false, features = [
 ] }
 base64 = { version = "0.22", default-features = false }
 env_logger = { version = "0.11", default-features = false }
+futures-util = { version = "0.3.31", default-features = false }
 jwt-simple = { version = "0.12", default-features = false, features = [
-  "optimal",
+  "pure-rust",
 ] }
 log = { version = "0.4", default-features = false }
 log-panics = { version = "2.1", default-features = false, features = [
   "with-backtrace",
 ] }
-mockall = { version = "0.13", optional = true, default-features = false }
+mockall = { version = "0.14", optional = true, default-features = false }
+omnect-ui-core = { path = "../app" }
 rand_core = { version = "0.9", default-features = false, features = ["std"] }
-reqwest = { version = "0.12.23", default-features = false, features = [
+reqwest = { version = "0.13", default-features = false, features = [
   "json",
-  "rustls-tls",
+  "rustls",
 ] }
 rust-ini = { version = "0.21", default-features = false }
 rustls = { version = "0.23", default-features = false, features = [
-  "aws_lc_rs",
+  "ring",
   "std",
   "tls12",
 ] }
@@ -64,6 +66,8 @@ serde_repr = { version = "0.1", default-features = false }
 serde_valid = { version = "2.0", default-features = false }
 static-files = { version = "0.3", default-features = false }
 tokio = { version = "1.45", default-features = false, features = [
+  "fs",
+  "io-util",
   "macros",
   "net",
   "process",

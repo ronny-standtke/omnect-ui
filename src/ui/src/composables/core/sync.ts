@@ -45,7 +45,7 @@ export function updateViewModelFromCore(): void {
 
 	try {
 		// Capture authentication state before update to detect transitions
-		const wasAuthenticated = viewModel.is_authenticated
+		const wasAuthenticated = viewModel.isAuthenticated
 
 		// Get serialized view model from WASM
 		const viewModelBytes = wasmModule.value.view() as Uint8Array
@@ -55,80 +55,66 @@ export function updateViewModelFromCore(): void {
 		const coreViewModel = GeneratedViewModel.deserialize(deserializer)
 
 		// Update the reactive view model with deserialized data
-		// system_info
-		if (coreViewModel.system_info) {
-			viewModel.system_info = {
+		// systemInfo
+		if (coreViewModel.systemInfo) {
+			viewModel.systemInfo = {
 				os: {
-					name: coreViewModel.system_info.os.name,
-					version: coreViewModel.system_info.os.version,
+					name: coreViewModel.systemInfo.os.name,
+					version: coreViewModel.systemInfo.os.version,
 				},
-				azure_sdk_version: coreViewModel.system_info.azure_sdk_version,
-				omnect_device_service_version: coreViewModel.system_info.omnect_device_service_version,
-				boot_time: coreViewModel.system_info.boot_time || null,
+				azureSdkVersion: coreViewModel.systemInfo.azureSdkVersion,
+				omnectDeviceServiceVersion: coreViewModel.systemInfo.omnectDeviceServiceVersion,
+				bootTime: coreViewModel.systemInfo.bootTime || null,
 			}
 		} else {
-			viewModel.system_info = null
+			viewModel.systemInfo = null
 		}
 
-		// network_status
-		if (coreViewModel.network_status) {
-			viewModel.network_status = {
-				network_status: coreViewModel.network_status.network_status.map((net) => ({
-					ipv4: {
-						addrs: net.ipv4.addrs.map((addr) => ({
-							addr: addr.addr,
-							dhcp: addr.dhcp,
-							prefix_len: addr.prefix_len,
-						})),
-						dns: net.ipv4.dns,
-						gateways: net.ipv4.gateways,
-					},
-					mac: net.mac,
-					name: net.name,
-					online: net.online,
-				})),
+		// networkStatus
+		if (coreViewModel.networkStatus) {
+			viewModel.networkStatus = {
+				networkStatus: coreViewModel.networkStatus.networkStatus,
 			}
 		} else {
-			viewModel.network_status = null
+			viewModel.networkStatus = null
 		}
 
-		// online_status
-		viewModel.online_status = coreViewModel.online_status ? { iothub: coreViewModel.online_status.iothub } : null
+		// onlineStatus
+		viewModel.onlineStatus = coreViewModel.onlineStatus ? { iothub: coreViewModel.onlineStatus.iothub } : null
 
-		// factory_reset - convert status variant to string literal
-		// Note: Skip if deserialization fails (can happen with bincode format mismatches)
+		// factoryReset - convert status variant to string literal
 		try {
-			viewModel.factory_reset = coreViewModel.factory_reset
+			viewModel.factoryReset = coreViewModel.factoryReset
 				? {
-						keys: coreViewModel.factory_reset.keys,
-						result: coreViewModel.factory_reset.result
+						keys: coreViewModel.factoryReset.keys,
+						result: coreViewModel.factoryReset.result
 							? {
-									status: factoryResetStatusToString(coreViewModel.factory_reset.result.status),
-									context: coreViewModel.factory_reset.result.context || null,
-									error: coreViewModel.factory_reset.result.error,
-									paths: coreViewModel.factory_reset.result.paths,
+									status: factoryResetStatusToString(coreViewModel.factoryReset.result.status),
+									context: coreViewModel.factoryReset.result.context || null,
+									error: coreViewModel.factoryReset.result.error,
+									paths: coreViewModel.factoryReset.result.paths,
 								}
 							: null,
 					}
 				: null
 		} catch (error) {
-			console.warn('[updateViewModelFromCore] Failed to deserialize factory_reset, keeping existing value:', error)
+			console.warn('[updateViewModelFromCore] Failed to deserialize factoryReset, keeping existing value:', error)
 		}
 
-		// update_validation_status
-		viewModel.update_validation_status = coreViewModel.update_validation_status
-			? { status: coreViewModel.update_validation_status.status }
+		// updateValidationStatus
+		viewModel.updateValidationStatus = coreViewModel.updateValidationStatus
+			? { status: coreViewModel.updateValidationStatus.status }
 			: null
 
-		// update_manifest
-		viewModel.update_manifest = coreViewModel.update_manifest ?? null
+		// updateManifest
+		viewModel.updateManifest = coreViewModel.updateManifest ?? null
 
 		// timeouts
 		viewModel.timeouts = coreViewModel.timeouts
 			? {
-					wait_online_timeout: {
-						nanos: coreViewModel.timeouts.wait_online_timeout.nanos,
-						secs: coreViewModel.timeouts.wait_online_timeout.secs,
+					waitOnlineTimeout: {
+						nanos: coreViewModel.timeouts.waitOnlineTimeout.nanos,
+						secs: coreViewModel.timeouts.waitOnlineTimeout.secs,
 					},
 				}
 			: null
@@ -136,80 +122,84 @@ export function updateViewModelFromCore(): void {
 		// healthcheck
 		viewModel.healthcheck = coreViewModel.healthcheck
 			? {
-					version_info: {
-						required: coreViewModel.healthcheck.version_info.required,
-						current: coreViewModel.healthcheck.version_info.current,
-						mismatch: coreViewModel.healthcheck.version_info.mismatch,
+					versionInfo: {
+						required: coreViewModel.healthcheck.versionInfo.required,
+						current: coreViewModel.healthcheck.versionInfo.current,
+						mismatch: coreViewModel.healthcheck.versionInfo.mismatch,
 					},
-					update_validation_status: {
-						status: coreViewModel.healthcheck.update_validation_status.status,
+					updateValidationStatus: {
+						status: coreViewModel.healthcheck.updateValidationStatus.status,
 					},
-					network_rollback_occurred: coreViewModel.healthcheck.network_rollback_occurred,
+					networkRollbackOccurred: coreViewModel.healthcheck.networkRollbackOccurred,
 				}
 			: null
 
 		// Boolean and string fields
-		viewModel.is_authenticated = coreViewModel.is_authenticated
-		viewModel.requires_password_set = coreViewModel.requires_password_set
-		viewModel.is_loading = coreViewModel.is_loading
-		viewModel.error_message = coreViewModel.error_message || null
-		viewModel.success_message = coreViewModel.success_message || null
-		viewModel.is_connected = coreViewModel.is_connected
-		viewModel.auth_token = coreViewModel.auth_token || null
+		viewModel.isAuthenticated = coreViewModel.isAuthenticated
+		viewModel.requiresPasswordSet = coreViewModel.requiresPasswordSet
+		viewModel.isLoading = coreViewModel.isLoading
+		viewModel.errorMessage = coreViewModel.errorMessage || null
+		viewModel.successMessage = coreViewModel.successMessage || null
+		viewModel.isConnected = coreViewModel.isConnected
+		viewModel.authToken = coreViewModel.authToken || null
 
 		// Sync the ref with the view model
-		authToken.value = viewModel.auth_token
+		authToken.value = viewModel.authToken
 
-		// Device operation state - convert bincode variant to typed object
-		viewModel.device_operation_state = convertDeviceOperationState(coreViewModel.device_operation_state)
-		viewModel.reconnection_attempt = coreViewModel.reconnection_attempt
-		viewModel.reconnection_timeout_seconds = coreViewModel.reconnection_timeout_seconds
+		// Overlay spinner state (synced BEFORE device/network state so watchers can read countdown)
+		// Preserve countdownSeconds if it's being actively managed by the Shell (countdown interval running)
+		const isNetworkChangeActive = viewModel.networkChangeState.type === 'waitingForNewIp'
+		const isDeviceOpActive = viewModel.deviceOperationState.type === 'rebooting'
+			|| viewModel.deviceOperationState.type === 'factoryResetting'
+			|| viewModel.deviceOperationState.type === 'updating'
+			|| viewModel.deviceOperationState.type === 'waitingReconnection'
+		const preserveCountdown = (isNetworkChangeActive || isDeviceOpActive)
+			&& viewModel.overlaySpinner.countdownSeconds !== null
 
-		// Network change state
-		viewModel.network_change_state = convertNetworkChangeState(coreViewModel.network_change_state)
-
-		// Network form state
-		viewModel.network_form_state = convertNetworkFormState(coreViewModel.network_form_state)
-
-		// Network form dirty flag
-		viewModel.network_form_dirty = coreViewModel.network_form_dirty
-
-		// Browser hostname and current connection adapter (computed in Core)
-		viewModel.browser_hostname = coreViewModel.browser_hostname || null
-		viewModel.current_connection_adapter = coreViewModel.current_connection_adapter || null
-
-		// Device offline tracking
-		viewModel.device_went_offline = coreViewModel.device_went_offline
-
-		// Network rollback modal state (computed in Core)
-		viewModel.should_show_rollback_modal = coreViewModel.should_show_rollback_modal
-		viewModel.default_rollback_enabled = coreViewModel.default_rollback_enabled
-
-		// Firmware upload state
-		viewModel.firmware_upload_state = convertUploadState(coreViewModel.firmware_upload_state)
-
-		// Overlay spinner state
-		// Preserve countdown_seconds if it's being actively managed by the Shell (network change polling)
-		const isNetworkChangeActive = viewModel.network_change_state.type === 'waiting_for_new_ip'
-		const preserveCountdown = isNetworkChangeActive && viewModel.overlay_spinner.countdown_seconds !== null
-
-		viewModel.overlay_spinner = {
-			overlay: coreViewModel.overlay_spinner.overlay,
-			title: coreViewModel.overlay_spinner.title,
-			text: coreViewModel.overlay_spinner.text || null,
-			timed_out: coreViewModel.overlay_spinner.timed_out,
-			progress: coreViewModel.overlay_spinner.progress !== null && coreViewModel.overlay_spinner.progress !== undefined
-				? coreViewModel.overlay_spinner.progress
+		viewModel.overlaySpinner = {
+			overlay: coreViewModel.overlaySpinner.overlay,
+			title: coreViewModel.overlaySpinner.title,
+			text: coreViewModel.overlaySpinner.text || null,
+			timedOut: coreViewModel.overlaySpinner.timedOut,
+			progress: coreViewModel.overlaySpinner.progress !== null && coreViewModel.overlaySpinner.progress !== undefined
+				? coreViewModel.overlaySpinner.progress
 				: null,
-			countdown_seconds: preserveCountdown
-				? viewModel.overlay_spinner.countdown_seconds // Keep Shell's calculated value
-				: (coreViewModel.overlay_spinner.countdown_seconds !== null && coreViewModel.overlay_spinner.countdown_seconds !== undefined
-					? coreViewModel.overlay_spinner.countdown_seconds
+			countdownSeconds: preserveCountdown
+				? viewModel.overlaySpinner.countdownSeconds // Keep Shell's calculated value
+				: (coreViewModel.overlaySpinner.countdownSeconds !== null && coreViewModel.overlaySpinner.countdownSeconds !== undefined
+					? coreViewModel.overlaySpinner.countdownSeconds
 					: null),
 		}
 
+		// Device operation state - convert bincode variant to typed object
+		viewModel.deviceOperationState = convertDeviceOperationState(coreViewModel.deviceOperationState)
+		viewModel.reconnectionAttempt = coreViewModel.reconnectionAttempt
+
+		// Network change state
+		viewModel.networkChangeState = convertNetworkChangeState(coreViewModel.networkChangeState)
+
+		// Network form state
+		viewModel.networkFormState = convertNetworkFormState(coreViewModel.networkFormState)
+
+		// Network form dirty flag
+		viewModel.networkFormDirty = coreViewModel.networkFormDirty
+
+		// Browser hostname and current connection adapter (computed in Core)
+		viewModel.browserHostname = coreViewModel.browserHostname || null
+		viewModel.currentConnectionAdapter = coreViewModel.currentConnectionAdapter || null
+
+		// Device offline tracking
+		viewModel.deviceWentOffline = coreViewModel.deviceWentOffline
+
+		// Network rollback modal state (computed in Core)
+		viewModel.shouldShowRollbackModal = coreViewModel.shouldShowRollbackModal
+		viewModel.defaultRollbackEnabled = coreViewModel.defaultRollbackEnabled
+
+		// Firmware upload state
+		viewModel.firmwareUploadState = convertUploadState(coreViewModel.firmwareUploadState)
+
 		// Auto-subscribe logic based on authentication state transition
-		if (viewModel.is_authenticated && !wasAuthenticated) {
+		if (viewModel.isAuthenticated && !wasAuthenticated) {
 			console.log('[useCore] User authenticated, triggering subscription')
 			if (authToken.value && !isSubscribed.value && sendEventCallback) {
 				isSubscribed.value = true
@@ -218,7 +208,7 @@ export function updateViewModelFromCore(): void {
 		}
 
 		// Reset subscription state on logout
-		if (!viewModel.is_authenticated && wasAuthenticated) {
+		if (!viewModel.isAuthenticated && wasAuthenticated) {
 			console.log('[useCore] User logged out, resetting subscription state and disconnecting Centrifugo')
 			isSubscribed.value = false
 			// Disconnect Centrifugo to ensure old tokens are not reused

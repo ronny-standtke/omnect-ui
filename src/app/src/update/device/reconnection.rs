@@ -51,14 +51,8 @@ pub fn handle_reconnection_timeout(model: &mut Model) -> Command<Effect, Event> 
 
     let operation = model.device_operation_state.operation_name();
 
-    let timeout_msg = if matches!(
-        model.device_operation_state,
-        DeviceOperationState::FactoryResetting
-    ) {
-        "Device did not come back online after 10 minutes. Please check the device manually."
-    } else {
-        "Device did not come back online after 5 minutes. Please check the device manually."
-    };
+    let timeout_msg =
+        "Device did not come back online. You may need to re-accept the security certificate.";
 
     model.device_operation_state = DeviceOperationState::ReconnectionFailed {
         operation: operation.clone(),
@@ -92,8 +86,6 @@ pub fn handle_healthcheck_response(
                 matches!(model.device_operation_state, DeviceOperationState::Updating);
 
             // For updates, we also check the status field
-            // Consider update done when status is Succeeded, Recovered, or NoUpdate
-            // (NoUpdate means there's no pending update, so previous one completed)
             let update_done = if is_updating {
                 result.as_ref().ok().is_some_and(is_update_complete)
             } else {
@@ -221,6 +213,7 @@ mod tests {
                 status: status.to_string(),
             },
             network_rollback_occurred: false,
+            ..Default::default()
         }
     }
 
@@ -300,7 +293,7 @@ mod tests {
                 &model.device_operation_state
             {
                 assert_eq!(operation, "Reboot");
-                assert!(reason.contains("5 minutes"));
+                assert!(reason.contains("security certificate"));
             }
             assert!(model.overlay_spinner.timed_out());
         }
@@ -322,7 +315,7 @@ mod tests {
                 &model.device_operation_state
             {
                 assert_eq!(operation, "Factory Reset");
-                assert!(reason.contains("10 minutes"));
+                assert!(reason.contains("security certificate"));
             }
         }
 

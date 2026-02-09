@@ -40,15 +40,16 @@ pub fn handle(event: AuthEvent, model: &mut Model) -> Command<Effect, Event> {
         AuthEvent::SetPassword { password } => {
             let request = SetPasswordRequest { password };
             unauth_post!(Auth, AuthEvent, model, "/set-password", SetPasswordResponse, "Set password",
-                body_json: &request
-            )
+                body_json: &request,
+                map: |token| AuthToken { token })
         }
 
         AuthEvent::SetPasswordResponse(result) => handle_response!(model, result, {
-            on_success: |model, _| {
+            on_success: |model, auth| {
                 model.requires_password_set = false;
+                model.auth_token = Some(auth.token);
+                model.is_authenticated = true;
             },
-            success_message: "Password set successfully",
         }),
 
         AuthEvent::UpdatePassword {
@@ -208,7 +209,7 @@ mod tests {
                 &mut model,
             );
 
-            // Session should remain intact on logout failure
+            // Session remains intact on logout failure
             assert!(model.is_authenticated);
             assert!(model.auth_token.is_some());
             assert!(!model.is_loading);
@@ -237,25 +238,28 @@ mod tests {
         }
 
         #[test]
-        fn success_clears_requires_password_set() {
+        fn success_authenticates_and_clears_requires_password_set() {
             let mut model = Model {
                 requires_password_set: true,
                 is_loading: true,
                 ..Default::default()
             };
 
-            let _ = handle(AuthEvent::SetPasswordResponse(Ok(())), &mut model);
+            let _ = handle(
+                AuthEvent::SetPasswordResponse(Ok(AuthToken {
+                    token: "set_password_token".into(),
+                })),
+                &mut model,
+            );
 
             assert!(!model.requires_password_set);
             assert!(!model.is_loading);
-            assert_eq!(
-                model.success_message,
-                Some("Password set successfully".into())
-            );
+            assert!(model.is_authenticated);
+            assert_eq!(model.auth_token, Some("set_password_token".into()));
         }
 
         #[test]
-        fn failure_keeps_requires_password_set() {
+        fn failure_keeps_requires_password_set_and_not_authenticated() {
             let mut model = Model {
                 requires_password_set: true,
                 is_loading: true,
@@ -269,6 +273,8 @@ mod tests {
 
             assert!(model.requires_password_set);
             assert!(!model.is_loading);
+            assert!(!model.is_authenticated);
+            assert!(model.auth_token.is_none());
             assert_eq!(model.error_message, Some("Password too weak".into()));
         }
     }

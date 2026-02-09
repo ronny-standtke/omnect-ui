@@ -55,8 +55,6 @@ test.describe('Device Reboot', () => {
     // Verify dialog disappears
     await expect(page.getByText('Reboot device', { exact: true })).not.toBeVisible();
     
-    // Verify API was NOT called (we can't easily verify "not called" without a spy, 
-    // but we can ensure no visual feedback of rebooting)
     await expect(page.getByText('Device is rebooting')).not.toBeVisible();
   });
 
@@ -68,29 +66,20 @@ test.describe('Device Reboot', () => {
 
     // Mock healthcheck to ALWAYS fail (simulating offline device)
     await page.route('**/healthcheck', async (route) => {
-      // Force connection error or simply don't fulfill to simulate timeout/unreachable
-      // But re-connection polling expects a response (even error) to count attempts?
-      // Actually, if we just abort, it might look like network error.
       await route.abort('failed');
     });
 
     // Initiate reboot
-    const rebootBtn = page.getByRole('button', { name: 'Reboot' }).first(); 
+    const rebootBtn = page.getByRole('button', { name: 'Reboot' }).first();
     await rebootBtn.click();
-    
+
     const confirmBtn = page.getByRole('dialog').getByRole('button', { name: 'Reboot' });
     await confirmBtn.click();
 
-    // Verify initial state
     await expect(page.getByText('Device is rebooting')).toBeVisible();
 
-    // Wait for timeout (configured to 2000ms in test env)
-    // We add a little buffer to be safe
     await page.waitForTimeout(2500);
 
-    // Verify timeout message
-    // The exact text comes from Rust: 
-    // "Device did not come back online after 5 minutes. Please check the device manually."
-    await expect(page.getByText('Device did not come back online after 5 minutes')).toBeVisible();
+    await expect(page.getByText('Device did not come back online. You may need to re-accept the security certificate.')).toBeVisible();
   });
 });

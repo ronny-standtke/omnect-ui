@@ -4,7 +4,7 @@ use std::fmt;
 use crate::types::*;
 
 /// Authentication events
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum AuthEvent {
     Login {
         password: String,
@@ -23,7 +23,7 @@ pub enum AuthEvent {
     #[serde(skip)]
     LogoutResponse(Result<(), String>),
     #[serde(skip)]
-    SetPasswordResponse(Result<(), String>),
+    SetPasswordResponse(Result<AuthToken, String>),
     #[serde(skip)]
     UpdatePasswordResponse(Result<(), String>),
     #[serde(skip)]
@@ -65,6 +65,8 @@ pub enum DeviceEvent {
     NewIpCheckTick,
     NewIpCheckTimeout,
     AckRollback,
+    AckFactoryResetResult,
+    AckUpdateValidation,
     #[serde(skip)]
     RebootResponse(Result<(), String>),
     #[serde(skip)]
@@ -79,6 +81,10 @@ pub enum DeviceEvent {
     HealthcheckResponse(Result<HealthcheckInfo, String>),
     #[serde(skip)]
     AckRollbackResponse(Result<(), String>),
+    #[serde(skip)]
+    AckFactoryResetResultResponse(Result<(), String>),
+    #[serde(skip)]
+    AckUpdateValidationResponse(Result<(), String>),
 }
 
 /// WebSocket/Centrifugo events
@@ -86,12 +92,12 @@ pub enum DeviceEvent {
 pub enum WebSocketEvent {
     SubscribeToChannels,
     UnsubscribeFromChannels,
-    SystemInfoUpdated(SystemInfo),
-    NetworkStatusUpdated(NetworkStatus),
-    OnlineStatusUpdated(OnlineStatus),
-    FactoryResetUpdated(FactoryReset),
-    UpdateValidationStatusUpdated(UpdateValidationStatus),
-    TimeoutsUpdated(Timeouts),
+    SystemInfoUpdated(String),
+    NetworkStatusUpdated(String),
+    OnlineStatusUpdated(String),
+    FactoryResetUpdated(String),
+    UpdateValidationStatusUpdated(String),
+    TimeoutsUpdated(String),
     Connected,
     Disconnected,
 }
@@ -105,7 +111,7 @@ pub enum UiEvent {
 }
 
 /// Main event enum - wraps domain events
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum Event {
     Initialize,
     Auth(AuthEvent),
@@ -144,9 +150,16 @@ impl fmt::Debug for AuthEvent {
             AuthEvent::Logout => write!(f, "Logout"),
             AuthEvent::CheckRequiresPasswordSet => write!(f, "CheckRequiresPasswordSet"),
             AuthEvent::LogoutResponse(r) => f.debug_tuple("LogoutResponse").field(r).finish(),
-            AuthEvent::SetPasswordResponse(r) => {
-                f.debug_tuple("SetPasswordResponse").field(r).finish()
-            }
+            AuthEvent::SetPasswordResponse(result) => match result {
+                Ok(_) => f
+                    .debug_tuple("SetPasswordResponse")
+                    .field(&"Ok(<redacted token>)")
+                    .finish(),
+                Err(e) => f
+                    .debug_tuple("SetPasswordResponse")
+                    .field(&format!("Err({e})"))
+                    .finish(),
+            },
             AuthEvent::UpdatePasswordResponse(r) => {
                 f.debug_tuple("UpdatePasswordResponse").field(r).finish()
             }

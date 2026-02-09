@@ -1,29 +1,32 @@
 <script setup lang="ts">
-import { ref } from "vue"
+import { ref, watch } from "vue"
 import { useRouter } from "vue-router"
 import PasswordField from "../components/common/PasswordField.vue"
 import { useCore } from "../composables/useCore"
-import { useMessageWatchers } from "../composables/useMessageWatchers"
 import { usePasswordForm } from "../composables/usePasswordForm"
-import { useAuthNavigation } from "../composables/useAuthNavigation"
 
 const router = useRouter()
-const { updatePassword, login } = useCore()
+const { viewModel, updatePassword } = useCore()
 const currentPassword = ref<string>("")
 const { password, repeatPassword, errorMsg, validatePasswords } = usePasswordForm()
 
-useAuthNavigation()
-
-useMessageWatchers({
-	onSuccess: async () => {
-		// Automatically log in with the new password
-		await login(password.value)
-		await router.push("/")
+// flush: 'sync' fires inline during the reactive assignment, before App.vue's
+// global useMessageWatchers (flush: 'pre') can clearSuccess() and erase the value.
+watch(
+	() => viewModel.successMessage,
+	(msg) => {
+		if (msg) router.push("/")
 	},
-	onError: (message) => {
-		errorMsg.value = message
-	}
-})
+	{ flush: 'sync' }
+)
+
+watch(
+	() => viewModel.errorMessage,
+	(msg) => {
+		if (msg) errorMsg.value = msg
+	},
+	{ flush: 'sync' }
+)
 
 const handleSubmit = async (): Promise<void> => {
 	if (!validatePasswords()) return
@@ -32,7 +35,7 @@ const handleSubmit = async (): Promise<void> => {
 </script>
 
 <template>
-	<v-sheet class="mx-auto pa-12 pb-8 m-t-16 flex flex-col gap-y-16" border elevation="0" max-width="448" rounded="lg">
+	<v-sheet class="mx-auto pa-8 m-t-16 flex flex-col gap-y-16" border elevation="0" max-width="448" rounded="lg">
 		<h1>Update Password</h1>
 		<v-form @submit.prevent @submit="handleSubmit">
 			<PasswordField
@@ -48,7 +51,7 @@ const handleSubmit = async (): Promise<void> => {
 				label="Repeat new password"
 			/>
 			<p style="color: rgb(var(--v-theme-error))">{{ errorMsg }}</p>
-			<v-btn class="mb-8" color="secondary" size="large" variant="text" type="submit" block>
+			<v-btn class="mb-8" color="primary" size="large" variant="flat" type="submit" block>
 				Set new password
 			</v-btn>
 		</v-form>

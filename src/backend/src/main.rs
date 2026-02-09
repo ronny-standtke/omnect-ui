@@ -42,8 +42,8 @@ use tokio::{
     sync::broadcast,
 };
 
-const UPLOAD_LIMIT_BYTES: usize = 250 * 1024 * 1024;
-const MEMORY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
+const UPLOAD_LIMIT_BYTES: usize = 1024 * 1024 * 1024;
+const MULTIPART_CHUNK_SIZE_BYTES: usize = 512 * 1024;
 
 // Cached common name (IP address) used for the current certificate
 static CACHED_COMMON_NAME: Mutex<Option<String>> = Mutex::new(None);
@@ -216,9 +216,12 @@ async fn run_until_shutdown(
 
     let (server_handle, server_task) = run_server(service_client.clone()).await?;
 
-    if let Err(e) = NetworkConfigService::process_pending_rollback(service_client).await {
-        error!("failed to process pending rollback: {e:#}");
-    }
+    let service_client_clone = service_client.clone();
+    let rollback_task = tokio::spawn(async move {
+        if let Err(e) = NetworkConfigService::process_pending_rollback(service_client_clone).await {
+            error!("failed to process pending rollback: {e:#}");
+        }
+    });
 
     let reason = tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -247,6 +250,7 @@ async fn run_until_shutdown(
         }
     };
 
+    rollback_task.abort();
     info!("{reason}");
 
     server_handle.stop(true).await;
@@ -262,6 +266,24 @@ async fn run_until_shutdown(
     }
 
     Ok(reason)
+}
+
+fn optimal_worker_count() -> usize {
+    const MIN_WORKERS: usize = 2;
+    const MAX_WORKERS: usize = 4;
+
+    let cpu_count = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2);
+
+    // For I/O-bound workloads, use fewer workers than CPUs
+    let workers = (cpu_count / 2).clamp(MIN_WORKERS, MAX_WORKERS);
+
+    info!(
+        "configuring {} worker threads (detected {} CPUs)",
+        workers, cpu_count
+    );
+    workers
 }
 
 async fn run_server(
@@ -303,8 +325,9 @@ async fn run_server(
             .app_data(
                 MultipartFormConfig::default()
                     .total_limit(UPLOAD_LIMIT_BYTES)
-                    .memory_limit(MEMORY_LIMIT_BYTES),
+                    .memory_limit(MULTIPART_CHUNK_SIZE_BYTES),
             )
+            .app_data(web::PayloadConfig::new(UPLOAD_LIMIT_BYTES))
             .app_data(Data::new(token_manager.clone()))
             .app_data(Data::new(api.clone()))
             .app_data(Data::new(static_files()))
@@ -357,9 +380,18 @@ async fn run_server(
             .route("/healthcheck", web::get().to(UiApi::healthcheck))
             .route("/network", web::post().to(UiApi::set_network_config))
             .route("/ack-rollback", web::post().to(UiApi::ack_rollback))
+            .route(
+                "/ack-factory-reset-result",
+                web::post().to(UiApi::ack_factory_reset_result),
+            )
+            .route(
+                "/ack-update-validation",
+                web::post().to(UiApi::ack_update_validation),
+            )
             .service(ResourceFiles::new("/static", static_files()))
             .default_service(web::route().to(UiApi::index))
     })
+    .workers(optimal_worker_count())
     .bind_rustls_0_23(format!("0.0.0.0:{ui_port}"), tls_config)
     .context("failed to bind server")?
     .disable_signals()

@@ -2,11 +2,19 @@
 //!
 //! Handles firmware file management and operations independent of HTTP concerns.
 
+#![allow(unused_imports)] // OpenOptionsExt needed for .mode() method
+#![allow(clippy::await_holding_lock)]
+
 use crate::{config::AppConfig, omnect_device_service_client::DeviceServiceClient};
-use actix_multipart::form::tempfile::TempFile;
+use actix_multipart::Field;
 use anyhow::{Context, Result};
-use log::{debug, error};
-use std::{fs, os::unix::fs::PermissionsExt};
+use futures_util::StreamExt;
+use log::{debug, error, info};
+use std::{
+    os::unix::fs::OpenOptionsExt, // Required for .mode() on OpenOptions
+    time::Instant,
+};
+use tokio::{fs, io::AsyncWriteExt};
 
 #[cfg(any(test, feature = "mock"))]
 use std::sync::{LazyLock, Mutex, MutexGuard};
@@ -28,40 +36,102 @@ impl FirmwareService {
         DATA_FOLDER_LOCK.lock().unwrap()
     }
 
-    /// Handle uploaded firmware file - clears data folder and persists the file
+    /// Handle uploaded firmware file via streaming - clears data folder and writes stream to file
     ///
     /// # Arguments
-    /// * `tmp_file` - The temporary uploaded file
+    /// * `field` - The multipart field containing the file stream
     ///
     /// # Returns
     /// Result indicating success or failure
-    pub fn handle_uploaded_firmware(tmp_file: TempFile) -> Result<()> {
-        // Clear data folder (non-critical if it fails)
-        if let Err(e) = Self::clear_data_folder() {
+    pub async fn receive_firmware(mut field: Field) -> Result<()> {
+        const WRITE_BUFFER_SIZE: usize = 512 * 1024;
+        const FLUSH_INTERVAL_BYTES: usize = 5 * 1024 * 1024;
+        const FLUSH_INTERVAL_SECS: u64 = 10;
+        const CHUNK_TIMEOUT_SECS: u64 = 30;
+        const TOTAL_TIMEOUT_SECS: u64 = 600;
+
+        info!("firmware upload started");
+        let start = Instant::now();
+        let mut last_flush = Instant::now();
+        let mut total_bytes = 0;
+        let mut bytes_since_flush = 0;
+
+        // Clear data folder before writing new firmware
+        if let Err(e) = Self::clear_data_folder().await {
             error!("failed to clear data folder: {e:#}");
-            // Continue anyway as this is not critical
         }
 
         let local_update_file = &AppConfig::get().paths.local_update_file;
-        let tmp_update_file = &AppConfig::get().paths.tmp_update_file;
 
-        // 1. store tempfile in temp dir (cannot be persisted across filesystems)
-        tmp_file
-            .file
-            .persist(tmp_update_file)
-            .context("failed to persist temporary file")?;
+        // 1. Create the destination file with permissions set atomically
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o750)
+            .open(local_update_file)
+            .await
+            .context("failed to create update file")?;
+        let mut file = tokio::io::BufWriter::with_capacity(WRITE_BUFFER_SIZE, file);
 
-        // 2. copy to local container filesystem
-        fs::copy(tmp_update_file, local_update_file)
-            .context("failed to copy firmware to data dir")?;
+        // 2. Stream chunks to the file with timeout protection
+        loop {
+            // Check total timeout
+            if start.elapsed().as_secs() > TOTAL_TIMEOUT_SECS {
+                anyhow::bail!(
+                    "upload exceeded maximum duration of {} seconds",
+                    TOTAL_TIMEOUT_SECS
+                );
+            }
 
-        // 3. allow host to access the file
-        let metadata =
-            fs::metadata(local_update_file).context("failed to get firmware metadata")?;
-        let mut perm = metadata.permissions();
-        perm.set_mode(0o750);
-        fs::set_permissions(local_update_file, perm)
-            .context("failed to set firmware permissions")?;
+            // Wait for next chunk with timeout
+            let chunk_result = tokio::time::timeout(
+                std::time::Duration::from_secs(CHUNK_TIMEOUT_SECS),
+                field.next(),
+            )
+            .await
+            .context(format!(
+                "chunk timeout: no data received for {} seconds",
+                CHUNK_TIMEOUT_SECS
+            ))?;
+
+            // Check if stream is complete
+            let Some(chunk) = chunk_result else {
+                break;
+            };
+
+            let data = chunk
+                .map_err(|e| anyhow::anyhow!(e.to_string()))
+                .context("failed to read chunk from stream")?;
+
+            let chunk_len = data.len();
+            total_bytes += chunk_len;
+            bytes_since_flush += chunk_len;
+
+            file.write_all(&data)
+                .await
+                .context("failed to write chunk to file")?;
+
+            // Periodic flush for durability and accurate metrics
+            let should_flush = bytes_since_flush >= FLUSH_INTERVAL_BYTES
+                || last_flush.elapsed().as_secs() >= FLUSH_INTERVAL_SECS;
+
+            if should_flush {
+                file.flush()
+                    .await
+                    .context("failed to flush intermediate data")?;
+                bytes_since_flush = 0;
+                last_flush = Instant::now();
+            }
+        }
+
+        // Final flush
+        file.flush().await.context("failed to flush update file")?;
+
+        info!(
+            "firmware upload completed: {:.2} MB",
+            total_bytes as f64 / 1024.0 / 1024.0
+        );
 
         Ok(())
     }
@@ -99,13 +169,13 @@ impl FirmwareService {
     }
 
     /// Clear all files in the data folder
-    fn clear_data_folder() -> Result<()> {
+    async fn clear_data_folder() -> Result<()> {
         debug!("clear_data_folder() called");
-        let data_dir = fs::read_dir(&AppConfig::get().paths.data_dir)?;
-        for entry in data_dir {
-            let entry = entry?;
-            if entry.path().is_file() {
-                fs::remove_file(entry.path())?;
+        let mut entries = fs::read_dir(&AppConfig::get().paths.data_dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            if entry.file_type().await?.is_file() {
+                fs::remove_file(entry.path()).await?;
             }
         }
 
@@ -116,7 +186,6 @@ impl FirmwareService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
     use std::io::Write as _;
 
     #[cfg(feature = "mock")]
@@ -126,72 +195,88 @@ mod tests {
     #[double]
     use crate::omnect_device_service_client::DeviceServiceClient;
 
+    // Note: Streaming tests would require mocking actix_multipart::Field which is complex.
+    // Focusing on file system operations for now.
+
     mod clear_data_folder {
         use super::*;
 
-        #[test]
-        fn removes_all_files() {
+        #[tokio::test]
+        async fn removes_all_files() {
             let _lock = FirmwareService::lock_for_test();
             let data_path = &AppConfig::get().paths.data_dir;
 
             // Ensure directory exists
-            fs::create_dir_all(data_path).expect("should create data dir");
+            fs::create_dir_all(data_path)
+                .await
+                .expect("should create data dir");
 
             // Create some test files
-            File::create(data_path.join("file1.txt"))
-                .expect("should create file1")
-                .write_all(b"test")
-                .expect("should write");
-            File::create(data_path.join("file2.txt"))
-                .expect("should create file2")
-                .write_all(b"test")
-                .expect("should write");
+            let mut file1 = fs::File::create(data_path.join("file1.txt"))
+                .await
+                .expect("should create file1");
+            file1.write_all(b"test").await.expect("should write");
+
+            let mut file2 = fs::File::create(data_path.join("file2.txt"))
+                .await
+                .expect("should create file2");
+            file2.write_all(b"test").await.expect("should write");
 
             // Verify files exist
             assert!(data_path.join("file1.txt").exists());
             assert!(data_path.join("file2.txt").exists());
 
             // Clear folder
-            FirmwareService::clear_data_folder().expect("should clear folder");
+            FirmwareService::clear_data_folder()
+                .await
+                .expect("should clear folder");
 
             // Verify files are deleted
             assert!(!data_path.join("file1.txt").exists());
             assert!(!data_path.join("file2.txt").exists());
         }
 
-        #[test]
-        fn succeeds_with_empty_directory() {
+        #[tokio::test]
+        async fn succeeds_with_empty_directory() {
             let _lock = FirmwareService::lock_for_test();
             let data_path = &AppConfig::get().paths.data_dir;
 
             // Ensure directory exists and is empty
-            fs::create_dir_all(data_path).expect("should create data dir");
+            fs::create_dir_all(data_path)
+                .await
+                .expect("should create data dir");
 
             // Clear folder when already empty
-            let result = FirmwareService::clear_data_folder();
+            let result = FirmwareService::clear_data_folder().await;
             assert!(result.is_ok());
         }
 
-        #[test]
-        fn preserves_subdirectories() {
+        #[tokio::test]
+        async fn preserves_subdirectories() {
             let _lock = FirmwareService::lock_for_test();
             let data_path = &AppConfig::get().paths.data_dir;
 
             // Ensure directory exists
-            fs::create_dir_all(data_path).expect("should create data dir");
+            fs::create_dir_all(data_path)
+                .await
+                .expect("should create data dir");
 
             // Create a subdirectory
             let subdir = data_path.join("subdir");
-            fs::create_dir_all(&subdir).expect("should create subdir");
+            fs::create_dir_all(&subdir)
+                .await
+                .expect("should create subdir");
 
             // Create a file in root
-            File::create(data_path.join("file.txt"))
-                .expect("should create file")
-                .write_all(b"test")
-                .expect("should write");
+            let mut file = fs::File::create(data_path.join("file.txt"))
+                .await
+                .expect("should create file");
+            file.write_all(b"test").await.expect("should write");
 
             // Clear folder
-            FirmwareService::clear_data_folder().expect("should clear folder");
+            FirmwareService::clear_data_folder()
+                .await
+                .expect("should clear folder");
 
             // File should be deleted
             assert!(!data_path.join("file.txt").exists());
@@ -201,7 +286,7 @@ mod tests {
             assert!(subdir.is_dir());
 
             // Cleanup
-            let _ = fs::remove_dir(&subdir);
+            let _ = fs::remove_dir(&subdir).await;
         }
     }
 
@@ -259,7 +344,6 @@ mod tests {
                 .times(1)
                 .returning(|_| Box::pin(async { Ok(()) }));
 
-            // Create RunUpdate via serde (since fields are private)
             let run_update: crate::omnect_device_service_client::RunUpdate =
                 serde_json::from_str(r#"{"validate_iothub_connection": true}"#)
                     .expect("should deserialize");

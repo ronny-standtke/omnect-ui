@@ -46,12 +46,17 @@ export async function mockRequireSetPassword(page: Page) {
 }
 
 export async function mockSetPasswordSuccess(page: Page) {
+  const token = jwt.sign({ sub: 'user123' }, 'secret', { expiresIn: '1h' });
   await page.route('**/set-password', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({}),
-    });
+    if (route.request().method() === 'POST') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/plain',
+        body: token,
+      });
+    } else {
+      await route.continue();
+    }
   });
 }
 
@@ -89,9 +94,42 @@ export async function mockPortalAuth(page: Page) {
   }, { key, user });
 }
 
+export async function mockLoginFailure(page: Page, message = 'invalid credentials') {
+  await page.route('**/token/login', async (route) => {
+    await route.fulfill({
+      status: 401,
+      contentType: 'text/plain',
+      body: message,
+    });
+  });
+}
+
+export async function mockSetPasswordFailure(page: Page, message = 'failed to set password') {
+  await page.route('**/set-password', async (route) => {
+    if (route.request().method() === 'POST') {
+      await route.fulfill({
+        status: 400,
+        contentType: 'text/plain',
+        body: message,
+      });
+    } else {
+      await route.continue();
+    }
+  });
+}
+
+export async function mockUpdatePasswordFailure(page: Page, message = 'current password is not correct') {
+  await page.route('**/update-password', async (route) => {
+    await route.fulfill({
+      status: 400,
+      contentType: 'text/plain',
+      body: message,
+    });
+  });
+}
+
 export async function mockNetworkConfig(page: Page) {
   // Mock the network configuration endpoint
-  // Note: The Core sends POST to /network, not api/v1/...
   await page.route('**/network', async (route) => {
     if (route.request().method() === 'POST') {
         // Mock successful application of network config

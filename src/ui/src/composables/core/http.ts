@@ -58,8 +58,7 @@ export async function executeHttpRequest(
 			fetchOptions.body = httpRequest.body as any
 		}
 
-		// Workaround: `crux_http` in the Rust core requires absolute URLs.
-		// The Rust side prefixes URLs with `https://relative` (a dummy host) to satisfy validation.
+		// URLs are prefixed with `https://relative` to satisfy validation.
 		// This side strips the prefix to send a relative URL to avoid HTTPS certificate issues.
 		let url = httpRequest.url
 		if (url.startsWith('https://relative')) {

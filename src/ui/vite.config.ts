@@ -21,6 +21,17 @@ export default defineConfig({
 			}
 		}
 	},
+	build: {
+		chunkSizeWarningLimit: 1000,
+		rollupOptions: {
+			output: {
+				manualChunks: {
+					vue: ["vue", "vue-router", "@vueuse/core"],
+					vuetify: ["vuetify"]
+				}
+			}
+		}
+	},
     preview: process.env.VITE_HTTPS === 'true' ? {
         port: 5173,
         https: {

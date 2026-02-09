@@ -1,10 +1,11 @@
 use crux_core::Command;
+use std::collections::HashMap;
 
 use crate::{
     auth_post,
     events::Event,
     model::Model,
-    types::{NetworkChangeState, NetworkConfigRequest, NetworkFormState},
+    types::{subnet_to_cidr, NetworkChangeState, NetworkConfigRequest, NetworkFormState},
     Effect,
 };
 
@@ -19,8 +20,15 @@ pub fn handle_set_network_config(config: String, model: &mut Model) -> Command<E
     let parsed_config: Result<NetworkConfigRequest, _> = serde_json::from_str(&config);
 
     match parsed_config {
-        Ok(config_req) => {
+        Ok(mut config_req) => {
             let is_server_addr = model.is_current_adapter(&config_req.name);
+
+            // If we are in editing state, we might need to fix up the netmask from the form's subnet_mask
+            if let NetworkFormState::Editing { form_data, .. } = &model.network_form_state {
+                if form_data.name == config_req.name {
+                    config_req.netmask = subnet_to_cidr(&form_data.subnet_mask);
+                }
+            }
 
             // Store network change state for later use
             // Show modal for: current connection AND (IP changed OR switching to DHCP OR rollback explicitly enabled)
@@ -46,12 +54,13 @@ pub fn handle_set_network_config(config: String, model: &mut Model) -> Command<E
             // Clear dirty flag when submitting
             model.network_form_dirty = false;
 
-            // Clear any previous messages so that identical subsequent messages
-            // (e.g. from multiple network config applies) trigger the UI watcher correctly.
+            // Clear any previous messages.
             model.success_message = None;
             model.error_message = None;
 
             // Send the request to backend
+            let body = serde_json::to_string(&config_req).unwrap_or(config);
+
             auth_post!(
                 Device,
                 DeviceEvent,
@@ -59,7 +68,7 @@ pub fn handle_set_network_config(config: String, model: &mut Model) -> Command<E
                 "/network",
                 SetNetworkConfigResponse,
                 "Set network config",
-                body_string: config,
+                body_string: body,
                 expect_json: crate::types::SetNetworkConfigResponse
             )
         }
@@ -124,6 +133,7 @@ pub fn handle_set_network_config_response(
                     adapter_name: adapter_name.clone(),
                     original_data: form_data.clone(),
                     form_data: form_data.clone(),
+                    errors: HashMap::new(),
                 };
             } else {
                 model.network_form_state = NetworkFormState::Idle;
@@ -260,7 +270,7 @@ mod tests {
                     name: "wlan0".to_string(),
                     ip_address: "192.168.1.100".to_string(),
                     dhcp: false,
-                    prefix_len: 24,
+                    subnet_mask: "255.255.255.0".to_string(),
                     dns: vec![],
                     gateways: vec![],
                 },
@@ -268,10 +278,11 @@ mod tests {
                     name: "wlan0".to_string(),
                     ip_address: "192.168.1.100".to_string(),
                     dhcp: false,
-                    prefix_len: 24,
+                    subnet_mask: "255.255.255.0".to_string(),
                     dns: vec![],
                     gateways: vec![],
                 },
+                errors: HashMap::new(),
             },
             ..Default::default()
         };
@@ -299,7 +310,7 @@ mod tests {
                     name: "wlan0".to_string(),
                     ip_address: "192.168.1.100".to_string(),
                     dhcp: false,
-                    prefix_len: 24,
+                    subnet_mask: "255.255.255.0".to_string(),
                     dns: vec![],
                     gateways: vec![],
                 },
@@ -307,10 +318,11 @@ mod tests {
                     name: "wlan0".to_string(),
                     ip_address: "192.168.1.100".to_string(),
                     dhcp: false,
-                    prefix_len: 24,
+                    subnet_mask: "255.255.255.0".to_string(),
                     dns: vec![],
                     gateways: vec![],
                 },
+                errors: HashMap::new(),
             },
             ..Default::default()
         };
@@ -338,7 +350,7 @@ mod tests {
                     name: "eth0".to_string(),
                     ip_address: "192.168.1.100".to_string(),
                     dhcp: false,
-                    prefix_len: 24,
+                    subnet_mask: "255.255.255.0".to_string(),
                     dns: vec![],
                     gateways: vec![],
                 },
@@ -346,10 +358,11 @@ mod tests {
                     name: "eth0".to_string(),
                     ip_address: "192.168.1.100".to_string(),
                     dhcp: false,
-                    prefix_len: 24,
+                    subnet_mask: "255.255.255.0".to_string(),
                     dns: vec![],
                     gateways: vec![],
                 },
+                errors: HashMap::new(),
             },
             ..Default::default()
         };

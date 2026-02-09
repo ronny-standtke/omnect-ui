@@ -1,167 +1,102 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue"
+import { computed, nextTick, ref, watch, type DeepReadonly } from "vue"
 import { useSnackbar } from "../../composables/useSnackbar"
 import { useCore, NetworkConfigRequest } from "../../composables/useCore"
+import type { DeviceNetwork } from "../../composables/useCore"
 import { useClipboard } from "../../composables/useClipboard"
-import { useIPValidation } from "../../composables/useIPValidation"
-import type { DeviceNetwork } from "../../types"
 
 const { showError } = useSnackbar()
 const { viewModel, setNetworkConfig, networkFormReset, networkFormUpdate } = useCore()
 const { copy } = useClipboard()
-const { isValidIp: validateIp, parseNetmask } = useIPValidation()
 
 const props = defineProps<{
-    networkAdapter: DeviceNetwork
+    networkAdapter: DeepReadonly<DeviceNetwork>
     isCurrentConnection: boolean
 }>()
+
+const cidrToSubnet = (cidr: number): string => {
+    const mask = cidr === 0 ? 0 : (~0 << (32 - cidr)) >>> 0;
+    return [
+        (mask >>> 24) & 0xff,
+        (mask >>> 16) & 0xff,
+        (mask >>> 8) & 0xff,
+        mask & 0xff
+    ].join('.');
+};
 
 const ipAddress = ref(props.networkAdapter?.ipv4?.addrs[0]?.addr || "")
 const dns = ref(props.networkAdapter?.ipv4?.dns?.join("\n") || "")
 const gateways = ref(props.networkAdapter?.ipv4?.gateways?.join("\n") || "")
 const addressAssignment = ref(props.networkAdapter?.ipv4?.addrs[0]?.dhcp ? "dhcp" : "static")
-const netmask = ref(props.networkAdapter?.ipv4?.addrs[0]?.prefix_len || 24)
+const subnetMask = ref(cidrToSubnet(props.networkAdapter?.ipv4?.addrs[0]?.prefixLen ?? 24))
 
-// State flags - declared early since they're used in watchers and initialization
+// State flags
 const isSubmitting = ref(false)
-const isSyncingFromWebSocket = ref(false)
-const isStartingFreshEdit = ref(false)
+const isSyncingFromCore = ref(false)
 
-// NOTE: NetworkFormStartEdit is now called by the parent DeviceNetworks.vue when tab changes
-// This prevents all mounted components from calling it simultaneously
-// Set flag to prevent the dirty flag watch from resetting form during initialization
-isStartingFreshEdit.value = true
-nextTick(() => {
+const syncLocalFieldsFromCore = (formData: any) => {
+    isSyncingFromCore.value = true
+    ipAddress.value = formData.ipAddress
+    dns.value = formData.dns.join("\n")
+    gateways.value = formData.gateways.join("\n")
+    addressAssignment.value = formData.dhcp ? "dhcp" : "static"
+    subnetMask.value = formData.subnetMask
+
+    // Ensure all reactive updates complete before allowing form updates to be sent back to Core
     nextTick(() => {
-        isStartingFreshEdit.value = false
+        isSyncingFromCore.value = false
     })
-})
-
-// Helper to reset form fields to match current adapter data
-const resetFormFields = () => {
-    ipAddress.value = props.networkAdapter?.ipv4?.addrs[0]?.addr || ""
-    dns.value = props.networkAdapter?.ipv4?.dns?.join("\n") || ""
-    gateways.value = props.networkAdapter?.ipv4?.gateways?.join("\n") || ""
-    addressAssignment.value = props.networkAdapter?.ipv4?.addrs[0]?.dhcp ? "dhcp" : "static"
-    netmask.value = props.networkAdapter?.ipv4?.addrs[0]?.prefix_len || 24
 }
 
-// Helper to send current form data to Core for dirty flag tracking
+// Watch for form state changes from Core
+watch(() => viewModel.networkFormState, (state) => {
+    if (state?.type === 'editing' && state.adapterName === props.networkAdapter.name) {
+        // If not dirty, we sync everything from Core (initialization or reset)
+        if (!viewModel.networkFormDirty) {
+            syncLocalFieldsFromCore(state.formData)
+        }
+    }
+}, { immediate: true })
+
 const sendFormUpdateToCore = () => {
     const formData = {
         name: props.networkAdapter.name,
-        ip_address: ipAddress.value,
+        ipAddress: ipAddress.value,
         dhcp: addressAssignment.value === "dhcp",
-        prefix_len: netmask.value,
+        subnetMask: subnetMask.value,
         dns: dns.value.split("\n").filter(d => d.trim()),
         gateways: gateways.value.split("\n").filter(g => g.trim())
     }
     networkFormUpdate(JSON.stringify(formData))
 }
 
-// Watch form fields and notify Core when they change
-// Use flush: 'post' to ensure watcher runs after all DOM updates
-watch([ipAddress, dns, gateways, addressAssignment, netmask], () => {
-    // Don't update dirty flag during submit or WebSocket sync
-    // Note: Core validates adapter_name matches the currently editing adapter
-    // This defends against hidden components (v-window) sending stale data
-    if (!isSubmitting.value && !isSyncingFromWebSocket.value) {
+watch([ipAddress, dns, gateways, addressAssignment, subnetMask], () => {
+    if (!isSubmitting.value && !isSyncingFromCore.value) {
         sendFormUpdateToCore()
     }
-}, { flush: 'post' })
-
-// Watch for form reset from Core (when dirty flag clears for this adapter)
-// This should ONLY reset the form when the user explicitly clicks "Reset",
-// NOT when starting a fresh edit or after completing a submit
-watch(() => viewModel.network_form_dirty, (isDirty, wasDirty) => {
-    // Skip reset if we're starting a fresh edit (the form is being initialized)
-    if (isStartingFreshEdit.value) {
-        return
-    }
-
-    // Skip reset during submit - the dirty flag clears during submit, not because user reset
-    if (isSubmitting.value) {
-        return
-    }
-
-    const isEditingThisAdapter = viewModel.network_form_state?.type === 'editing' &&
-                                  (viewModel.network_form_state as any).adapter_name === props.networkAdapter.name
-
-    if (wasDirty === true && isDirty === false && isEditingThisAdapter) {
-        // Reset local form state to match current adapter
-        isSyncingFromWebSocket.value = true
-        resetFormFields()
-
-        nextTick(() => {
-            nextTick(() => {
-                isSyncingFromWebSocket.value = false
-            })
-        })
-    }
 })
-
-// Watch for prop changes from WebSocket updates and sync local state
-// IMPORTANT: We watch the entire adapter object to ensure reactivity,
-// but only reset form fields if not dirty. This allows props.networkAdapter.online
-// to remain reactive even when the form is dirty.
-watch(() => props.networkAdapter, (newAdapter) => {
-    if (!newAdapter) return
-
-    // Only reset form fields if user hasn't made unsaved changes
-    // But we still need to let this watcher run to maintain reactivity for
-    // non-form props like 'online' status
-    if (!isSubmitting.value && !viewModel.network_form_dirty) {
-        // Set flag to prevent form watchers from firing during sync
-        isSyncingFromWebSocket.value = true
-        resetFormFields()
-
-        // Clear flag after Vue finishes all reactive updates AND all post-flush watchers
-        // Need double nextTick: first for reactive updates, second for post-flush watchers
-        nextTick(() => {
-            nextTick(() => {
-                isSyncingFromWebSocket.value = false
-            })
-        })
-    }
-    // Note: We don't return early when dirty - this allows Vue's reactivity
-    // system to track changes to props.networkAdapter.online and other non-form props
-}, { deep: true })
 
 const isDHCP = computed(() => addressAssignment.value === "dhcp")
+const managedVariant = computed(() => isDHCP.value ? 'plain' as const : 'outlined' as const)
 
-// Use Core's computed rollback modal flags
-const isRollbackRequired = computed(() => viewModel.should_show_rollback_modal)
-const enableRollback = ref(true) // Tracks user's checkbox state
+const isRollbackRequired = computed(() => viewModel.shouldShowRollbackModal)
+const enableRollback = ref(true)
 const confirmationModalOpen = ref(false)
 
-// Watch Core's default_rollback_enabled to update checkbox when modal shows
-watch(() => viewModel.should_show_rollback_modal, (shouldShow) => {
+watch(() => viewModel.shouldShowRollbackModal, (shouldShow) => {
     if (shouldShow) {
-        enableRollback.value = viewModel.default_rollback_enabled
+        enableRollback.value = viewModel.defaultRollbackEnabled
     }
 })
 
-// Determine if switching to DHCP for UI text (Core computes this, but we still need it for modal text)
 const switchingToDhcp = computed(() => !props.networkAdapter?.ipv4?.addrs[0]?.dhcp && isDHCP.value)
 
 const restoreSettings = () => {
-    // Reset Core state (clears dirty flag and NetworkFormState)
     networkFormReset(props.networkAdapter.name)
-
-    // Reset local form state
-    resetFormFields()
-}
-
-const setNetMask = (mask: string) => {
-    const prefixLen = parseNetmask(mask)
-    if (prefixLen === null) {
-        return "Invalid netmask"
-    }
-    netmask.value = prefixLen
 }
 
 watch(
-	() => viewModel.error_message,
+	() => viewModel.errorMessage,
 	(newMessage) => {
 		if (newMessage) {
 			showError(newMessage)
@@ -171,7 +106,7 @@ watch(
 )
 
 watch(
-	() => viewModel.success_message,
+	() => viewModel.successMessage,
 	(newMessage) => {
 		if (newMessage) {
 			isSubmitting.value = false
@@ -180,11 +115,9 @@ watch(
 	}
 )
 
-// Watch for form state changes from Core as a reliable way to reset submitting state
 watch(
-	() => viewModel.network_form_state,
+	() => viewModel.networkFormState,
 	(newState) => {
-		// If we were submitting and the state is no longer submitting, reset our flag
 		if (isSubmitting.value && newState?.type !== 'submitting') {
 			isSubmitting.value = false
 		}
@@ -192,7 +125,6 @@ watch(
 )
 
 const submit = async () => {
-    // Check if the change requires rollback protection
     if (isRollbackRequired.value) {
         confirmationModalOpen.value = true
     } else {
@@ -209,9 +141,9 @@ const submitNetworkConfig = async (includeRollback: boolean) => {
         props.networkAdapter.ipv4?.addrs[0]?.addr !== ipAddress.value,
         props.networkAdapter.name,
         isDHCP.value,
-        ipAddress.value || null,
+        isDHCP.value ? null : (ipAddress.value || null),
         props.networkAdapter.ipv4?.addrs[0]?.addr || null,
-        netmask.value || null,
+        null, // netmask will be determined by Core
         gateways.value.split("\n").filter(g => g.trim()) || [],
         dns.value.split("\n").filter(d => d.trim()) || [],
         includeRollback ? enableRollback.value : null,
@@ -224,6 +156,13 @@ const submitNetworkConfig = async (includeRollback: boolean) => {
 const cancelRollbackModal = () => {
     confirmationModalOpen.value = false
 }
+
+const errors = computed(() => {
+    if (viewModel.networkFormState?.type === 'editing' || viewModel.networkFormState?.type === 'submitting') {
+        return (viewModel.networkFormState as any).errors
+    }
+    return {}
+})
 </script>
 
 <template>
@@ -268,64 +207,161 @@ const cancelRollbackModal = () => {
                 </v-card-text>
                 <v-card-actions>
                     <v-spacer></v-spacer>
-                    <v-btn color="secondary" variant="text" @click="cancelRollbackModal">
+                    <v-btn color="primary" variant="text" @click="cancelRollbackModal">
                         Cancel
                     </v-btn>
-                    <v-btn color="primary" variant="text" @click="submitNetworkConfig(true)" data-cy="network-confirm-apply-button">
+                    <v-btn color="primary" variant="flat" @click="submitNetworkConfig(true)" data-cy="network-confirm-apply-button">
                         Apply Changes
                     </v-btn>
                 </v-card-actions>
             </v-card>
         </v-dialog>
 
-        <v-form @submit.prevent="submit" class="flex flex-col gap-y-4 ml-4">
-            <v-chip size="large" class="ma-2" label
-                :color="props.networkAdapter.online ? 'light-green-darken-2' : 'red-darken-2'">
-                {{ props.networkAdapter.online ? "Online" : "Offline" }}{{ props.isCurrentConnection && props.networkAdapter.online ? " (current connection)" : "" }}
-            </v-chip>
-            <v-radio-group v-model="addressAssignment" inline>
-                <v-radio label="DHCP" value="dhcp"></v-radio>
-                <v-radio label="Static" value="static"></v-radio>
-            </v-radio-group>
-            <v-text-field :readonly="isDHCP" v-model="ipAddress" label="IP Address" :rules="[validateIp]" outlined
-                append-inner-icon="mdi-content-copy" @click:append-inner="copy(`${ipAddress}/${netmask}`)">
-                <template #append-inner>
-                    <v-btn :disabled="isDHCP" size="large" append-icon="mdi-menu-down" variant="text" density="compact"
-                        slim class="m-0">
-                        /{{ netmask }}
-                        <v-menu activator="parent">
-                            <v-list>
-                                <v-list-item v-for="(item, index) in ['/8', '/16', '/24', '/32']" :key="index"
-                                    :value="index">
-                                    <v-list-item-title @click="setNetMask(item)">{{ item }}</v-list-item-title>
-                                </v-list-item>
-                            </v-list>
-                        </v-menu>
-                    </v-btn>
+        <v-form @submit.prevent="submit" class="ml-4">
+            <!-- Current Connection Warning -->
+            <v-alert v-if="props.isCurrentConnection" type="info" variant="tonal" class="mb-6" density="compact">
+                <template #prepend>
+                    <v-icon icon="mdi-account-network" size="small"></v-icon>
                 </template>
-            </v-text-field>
-            <v-text-field label="MAC Address" variant="outlined" readonly v-model="props.networkAdapter.mac"
-                append-inner-icon="mdi-content-copy"
-                @click:append-inner="copy(props.networkAdapter.mac)"></v-text-field>
-            <v-textarea :readonly="isDHCP" v-model="gateways" label="Gateways" variant="outlined" rows="3" no-resize
-                append-inner-icon="mdi-content-copy" @click:append-inner="copy(ipAddress)"></v-textarea>
-            <v-textarea v-model="dns" label="DNS" variant="outlined" rows="3" no-resize
-                append-inner-icon="mdi-content-copy" @click:append-inner="copy(ipAddress)"></v-textarea>
-            <div class="flex flex-row gap-x-4">
-                <v-btn color="secondary" type="submit" variant="text" :loading="isSubmitting" :disabled="!viewModel.network_form_dirty" data-cy="network-apply-button">
+                This is your <strong>current connection</strong>. Changing these settings will interrupt your session.
+            </v-alert>
+
+            <!-- Adapter Status, MAC and Mode -->
+            <div class="d-flex align-center flex-wrap gap-4 mb-8">
+                <v-chip size="large" label
+                    :color="props.networkAdapter.online ? 'light-green-darken-2' : 'red-darken-2'">
+                    <v-icon start :icon="props.networkAdapter.online ? 'mdi-check-circle' : 'mdi-alert-circle'"></v-icon>
+                    {{ props.networkAdapter.online ? "Online" : "Offline" }}
+                </v-chip>
+
+                <div class="mac-field">
+                    <label class="v-label text-medium-emphasis">MAC:</label>
+                    <div class="d-flex align-center gap-2">
+                        <span>{{ props.networkAdapter.mac }}</span>
+                        <v-icon icon="mdi-content-copy" size="x-small" class="cursor-pointer" @click="copy(props.networkAdapter.mac)"></v-icon>
+                    </div>
+                </div>
+
+                <v-spacer></v-spacer>
+
+                <v-radio-group v-model="addressAssignment" inline label="Mode:" hide-details density="compact">
+                    <v-radio label="DHCP" value="dhcp" color="secondary"></v-radio>
+                    <v-radio label="Static" value="static" color="secondary"></v-radio>
+                </v-radio-group>
+            </div>
+
+            <!-- Connectivity -->
+            <div class="text-subtitle-2 text-medium-emphasis mb-1">Connectivity</div>
+            <v-row>
+                <v-col cols="12" md="6">
+                    <v-text-field :readonly="isDHCP" v-model="ipAddress" label="IP Address" :error-messages="errors?.ipAddress" :variant="managedVariant"
+                        :class="{ 'managed-field': isDHCP }"
+                        :hint="isDHCP ? 'Automatically assigned by DHCP' : ''"
+                        :persistent-hint="isDHCP"
+                        placeholder="0.0.0.0"
+                        @click:append-inner="copy(ipAddress)">
+                        <template #append-inner>
+                            <v-tooltip v-if="isDHCP" text="This field is managed by DHCP and cannot be manually edited." location="top">
+                                <template #activator="{ props: tooltipProps }">
+                                    <v-icon v-bind="tooltipProps" icon="mdi-lock-outline" size="small" class="managed-icon mr-1"></v-icon>
+                                </template>
+                            </v-tooltip>
+                            <v-icon icon="mdi-content-copy" size="small" @click.stop="copy(ipAddress)" class="cursor-pointer"></v-icon>
+                        </template>
+                    </v-text-field>
+                </v-col>
+                <v-col cols="12" md="6">
+                    <v-text-field :readonly="isDHCP" v-model="subnetMask" label="Subnet Mask" :error-messages="errors?.subnetMask" :variant="managedVariant"
+                        :class="{ 'managed-field': isDHCP }"
+                        :hint="isDHCP ? 'Automatically assigned by DHCP' : 'e.g. 255.255.255.0'"
+                        :persistent-hint="isDHCP"
+                        placeholder="255.255.255.0"
+                        @click:append-inner="copy(subnetMask)">
+                        <template #append-inner>
+                            <v-tooltip v-if="isDHCP" text="This field is managed by DHCP and cannot be manually edited." location="top">
+                                <template #activator="{ props: tooltipProps }">
+                                    <v-icon v-bind="tooltipProps" icon="mdi-lock-outline" size="small" class="managed-icon mr-1"></v-icon>
+                                </template>
+                            </v-tooltip>
+                            <v-icon icon="mdi-content-copy" size="small" @click.stop="copy(subnetMask)" class="cursor-pointer"></v-icon>
+                        </template>
+                    </v-text-field>
+                </v-col>
+            </v-row>
+
+            <!-- Network Services -->
+            <div class="text-subtitle-2 text-medium-emphasis mb-1">Network Services</div>
+            <v-row>
+                <v-col cols="12" md="6">
+                    <v-textarea :readonly="isDHCP" v-model="gateways" label="Gateways" :variant="managedVariant" rows="3" no-resize
+                        :class="{ 'managed-field': isDHCP }"
+                        :hint="isDHCP ? 'Automatically assigned by DHCP' : ''"
+                        :persistent-hint="isDHCP"
+                        placeholder="None"
+                        @click:append-inner="copy(gateways)">
+                        <template #append-inner>
+                            <v-tooltip v-if="isDHCP" text="This field is managed by DHCP and cannot be manually edited." location="top">
+                                <template #activator="{ props: tooltipProps }">
+                                    <v-icon v-bind="tooltipProps" icon="mdi-lock-outline" size="small" class="managed-icon mr-1"></v-icon>
+                                </template>
+                            </v-tooltip>
+                            <v-icon icon="mdi-content-copy" size="small" @click.stop="copy(gateways)" class="cursor-pointer"></v-icon>
+                        </template>
+                    </v-textarea>
+                </v-col>
+                <v-col cols="12" md="6">
+                    <v-textarea v-model="dns" label="DNS Servers" variant="outlined" rows="3" no-resize
+                        hint="Enter one DNS server per line"
+                        persistent-hint
+                        placeholder="None"
+                        append-inner-icon="mdi-content-copy" @click:append-inner="copy(dns)"></v-textarea>
+                </v-col>
+            </v-row>
+
+            <div class="sticky-footer bg-surface border-t py-4 d-flex gap-x-4 align-center mt-4">
+                <v-btn color="primary" type="submit" variant="flat" :loading="isSubmitting" :disabled="!viewModel.networkFormDirty" data-cy="network-apply-button">
                     Apply Changes
                 </v-btn>
-                <v-btn :disabled="isSubmitting || !viewModel.network_form_dirty" type="reset" variant="text" @click.prevent="restoreSettings" data-cy="network-discard-button">
+                <v-btn :disabled="isSubmitting || !viewModel.networkFormDirty" type="reset" variant="text" @click.prevent="restoreSettings" data-cy="network-discard-button">
                     Discard Changes
                 </v-btn>
+                <v-spacer></v-spacer>
+                <v-fade-transition>
+                    <div v-if="viewModel.networkFormDirty" class="text-caption text-medium-emphasis d-flex align-center">
+                        <v-icon icon="mdi-pencil-circle-outline" size="small" class="mr-1"></v-icon>
+                        You have unsaved changes
+                    </div>
+                </v-fade-transition>
             </div>
         </v-form>
     </div>
 </template>
 
-<style lang="css">
-.v-field:has(input[type="text"]:read-only),
+<style lang="css" scoped>
+.v-field:has(input:read-only),
 .v-field:has(textarea:read-only) {
-    background-color: #f5f5f5 !important;
+    background-color: rgba(var(--v-theme-on-surface), 0.02) !important;
+}
+
+.managed-field :deep(.v-field__input),
+.managed-field :deep(.v-label) {
+    color: rgba(var(--v-theme-on-surface), 0.5) !important;
+}
+
+.managed-icon {
+    opacity: 0.5;
+}
+
+.mac-field {
+    max-width: 280px;
+    flex-shrink: 0;
+}
+
+.sticky-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background-color: rgb(var(--v-theme-surface));
+  width: 100%;
 }
 </style>

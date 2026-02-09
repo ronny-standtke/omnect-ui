@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use serde_valid::Validate;
+use std::collections::HashMap;
 
 /// Validate IPv4 address format
 pub fn is_valid_ipv4(ip: &str) -> bool {
@@ -20,6 +22,54 @@ pub fn is_valid_ipv4(ip: &str) -> bool {
     })
 }
 
+/// Convert CIDR prefix length to Dotted Decimal Subnet Mask
+pub fn cidr_to_subnet(cidr: u32) -> String {
+    if cidr > 32 {
+        return "".to_string();
+    }
+    let mask = if cidr == 0 {
+        0
+    } else {
+        0xffffffffu32 << (32 - cidr)
+    };
+    format!(
+        "{}.{}.{}.{}",
+        (mask >> 24) & 0xff,
+        (mask >> 16) & 0xff,
+        (mask >> 8) & 0xff,
+        mask & 0xff
+    )
+}
+
+/// Convert Dotted Decimal Subnet Mask to CIDR prefix length
+pub fn subnet_to_cidr(subnet: &str) -> Option<u32> {
+    let parts: Vec<u32> = subnet
+        .split('.')
+        .filter_map(|p| p.parse::<u32>().ok())
+        .collect();
+
+    if parts.len() != 4 || parts.iter().any(|&p| p > 255) {
+        return None;
+    }
+
+    let mut mask: u32 = 0;
+    for &part in &parts {
+        mask = (mask << 8) | part;
+    }
+
+    // A valid subnet mask must be a sequence of 1s followed by a sequence of 0s.
+    // We check this by ensuring that (not mask) + 1 is a power of 2.
+    // e.g. 255.255.255.0 is 11111111.11111111.11111111.00000000
+    // not mask is 00000000.00000000.00000000.11111111 (255)
+    // 255 + 1 = 256 (power of 2)
+    let inverted = !mask;
+    if (inverted.wrapping_add(1) & inverted) == 0 {
+        Some(mask.count_ones())
+    } else {
+        None
+    }
+}
+
 /// Validate and parse netmask value
 /// Accepts "/24" or "24" format, returns prefix length if valid
 pub fn parse_netmask(mask: &str) -> Option<u32> {
@@ -34,6 +84,7 @@ pub fn parse_netmask(mask: &str) -> Option<u32> {
 
 /// IP address configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct IpAddress {
     pub addr: String,
     pub dhcp: bool,
@@ -42,6 +93,7 @@ pub struct IpAddress {
 
 /// Internet protocol configuration (IPv4/IPv6)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct InternetProtocol {
     pub addrs: Vec<IpAddress>,
     pub dns: Vec<String>,
@@ -50,6 +102,7 @@ pub struct InternetProtocol {
 
 /// Network adapter information
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct DeviceNetwork {
     pub ipv4: InternetProtocol,
     pub mac: String,
@@ -61,6 +114,7 @@ pub struct DeviceNetwork {
 
 /// Network status from WebSocket
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct NetworkStatus {
     pub network_status: Vec<DeviceNetwork>,
 }
@@ -83,9 +137,14 @@ impl NetworkStatus {
         }
 
         // Special case: if we are on localhost, and an adapter has "localhost" IP, match it
-        if hostname == "localhost" {
+        if hostname == "localhost" || hostname == "127.0.0.1" {
             for adapter in &self.network_status {
-                if adapter.ipv4.addrs.iter().any(|ip| ip.addr == "localhost") {
+                if adapter
+                    .ipv4
+                    .addrs
+                    .iter()
+                    .any(|ip| ip.addr == "localhost" || ip.addr == "127.0.0.1")
+                {
                     return Some(adapter);
                 }
             }
@@ -98,15 +157,18 @@ impl NetworkStatus {
 }
 
 /// Network configuration request
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkConfigRequest {
     pub is_server_addr: bool,
     pub ip_changed: bool,
+    #[validate(min_length = 1)]
     pub name: String,
     pub dhcp: bool,
     pub ip: Option<String>,
     pub previous_ip: Option<String>,
+    #[validate(maximum = 32)]
+    #[validate(minimum = 0)]
     pub netmask: Option<u32>,
     pub gateway: Vec<String>,
     pub dns: Vec<String>,
@@ -114,48 +176,40 @@ pub struct NetworkConfigRequest {
     /// Only applicable when is_server_addr=true AND ip_changed=true.
     #[serde(default)]
     pub enable_rollback: Option<bool>,
-    /// Whether this change is switching to DHCP (for UI messaging)
+    /// Whether this change is switching to DHCP
     #[serde(default)]
     pub switching_to_dhcp: bool,
 }
 
 /// Form data for network configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct NetworkFormData {
     pub name: String,
     pub ip_address: String,
     pub dhcp: bool,
-    pub prefix_len: u32,
+    pub subnet_mask: String,
     pub dns: Vec<String>,
     pub gateways: Vec<String>,
 }
 
 impl From<&DeviceNetwork> for NetworkFormData {
     fn from(adapter: &DeviceNetwork) -> Self {
+        let addr = adapter.ipv4.addrs.first();
         Self {
             name: adapter.name.clone(),
-            ip_address: adapter
-                .ipv4
-                .addrs
-                .first()
-                .map(|a| a.addr.clone())
-                .unwrap_or_default(),
-            dhcp: adapter.ipv4.addrs.first().map(|a| a.dhcp).unwrap_or(false),
-            prefix_len: adapter
-                .ipv4
-                .addrs
-                .first()
-                .map(|a| a.prefix_len)
-                .unwrap_or(24),
+            ip_address: addr.map(|a| a.addr.clone()).unwrap_or_default(),
+            dhcp: addr.map(|a| a.dhcp).unwrap_or(false),
+            subnet_mask: cidr_to_subnet(addr.map(|a| a.prefix_len).unwrap_or(24)),
             dns: adapter.ipv4.dns.clone(),
             gateways: adapter.ipv4.gateways.clone(),
         }
     }
 }
 
-/// State of network form (to prevent WebSocket interference)
+/// State of network form
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum NetworkFormState {
     #[default]
     Idle,
@@ -163,11 +217,15 @@ pub enum NetworkFormState {
         adapter_name: String,
         form_data: NetworkFormData,
         original_data: NetworkFormData,
+        #[serde(default)]
+        errors: HashMap<String, String>,
     },
     Submitting {
         adapter_name: String,
         form_data: NetworkFormData,
         original_data: NetworkFormData,
+        #[serde(default)]
+        errors: HashMap<String, String>,
     },
 }
 
@@ -178,6 +236,7 @@ impl NetworkFormState {
             adapter_name,
             form_data,
             original_data,
+            errors,
         } = self
         {
             if adapter_name == target_adapter_name {
@@ -185,6 +244,7 @@ impl NetworkFormState {
                     adapter_name: adapter_name.clone(),
                     form_data: form_data.clone(),
                     original_data: original_data.clone(),
+                    errors: errors.clone(),
                 })
             } else {
                 None
@@ -200,12 +260,14 @@ impl NetworkFormState {
             adapter_name,
             form_data,
             original_data,
+            errors,
         } = self
         {
             Some(Self::Editing {
                 adapter_name: adapter_name.clone(),
                 form_data: form_data.clone(),
                 original_data: original_data.clone(),
+                errors: errors.clone(),
             })
         } else {
             None
@@ -277,7 +339,7 @@ impl NetworkFormState {
 /// - **NewIpTimeout**: Timeout expired without rollback enabled, show manual nav message
 /// - **WaitingForOldIp**: Rollback assumed, now polling old IP to verify device is back
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum NetworkChangeState {
     /// No network change in progress
     #[default]
@@ -370,6 +432,32 @@ mod tests {
             assert_eq!(parse_netmask("abc"), None);
             assert_eq!(parse_netmask("-1"), None);
             assert_eq!(parse_netmask("24.5"), None);
+        }
+
+        #[test]
+        fn cidr_to_subnet_converts_correctly() {
+            assert_eq!(cidr_to_subnet(24), "255.255.255.0");
+            assert_eq!(cidr_to_subnet(16), "255.255.0.0");
+            assert_eq!(cidr_to_subnet(8), "255.0.0.0");
+            assert_eq!(cidr_to_subnet(32), "255.255.255.255");
+            assert_eq!(cidr_to_subnet(0), "0.0.0.0");
+        }
+
+        #[test]
+        fn subnet_to_cidr_converts_correctly() {
+            assert_eq!(subnet_to_cidr("255.255.255.0"), Some(24));
+            assert_eq!(subnet_to_cidr("255.255.0.0"), Some(16));
+            assert_eq!(subnet_to_cidr("255.0.0.0"), Some(8));
+            assert_eq!(subnet_to_cidr("255.255.255.255"), Some(32));
+            assert_eq!(subnet_to_cidr("0.0.0.0"), Some(0));
+        }
+
+        #[test]
+        fn subnet_to_cidr_rejects_invalid_masks() {
+            assert_eq!(subnet_to_cidr("255.255.255.1"), None); // Non-contiguous
+            assert_eq!(subnet_to_cidr("255.255.256.0"), None); // Out of range
+            assert_eq!(subnet_to_cidr("255.255.0"), None); // Too few parts
+            assert_eq!(subnet_to_cidr("abc.def.ghi.jkl"), None);
         }
     }
 

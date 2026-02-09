@@ -17,42 +17,41 @@ import { useCentrifuge } from '../useCentrifugo'
  * The main reactive view model, mirroring the Crux Core's Model struct
  */
 export const viewModel = reactive<ViewModel>({
-	system_info: null,
-	network_status: null,
-	online_status: null,
-	factory_reset: null,
-	update_validation_status: null,
-	update_manifest: null,
+	systemInfo: null,
+	networkStatus: null,
+	onlineStatus: null,
+	factoryReset: null,
+	updateValidationStatus: null,
+	updateManifest: null,
 	timeouts: null,
 	healthcheck: null,
-	is_authenticated: false,
-	requires_password_set: false,
-	is_loading: false,
-	error_message: null,
-	success_message: null,
-	is_connected: false,
-	auth_token: null,
+	isAuthenticated: false,
+	requiresPasswordSet: false,
+	isLoading: false,
+	errorMessage: null,
+	successMessage: null,
+	isConnected: false,
+	authToken: null,
 	// Device operation state
-	device_operation_state: { type: 'idle' },
-	reconnection_attempt: 0,
-	reconnection_timeout_seconds: 300, // 5 minutes default
+	deviceOperationState: { type: 'idle' },
+	reconnectionAttempt: 0,
 	// Network change state
-	network_change_state: { type: 'idle' },
+	networkChangeState: { type: 'idle' },
 	// Network form state
-	network_form_state: { type: 'idle' },
+	networkFormState: { type: 'idle' },
 	// Network form dirty flag
-	network_form_dirty: false,
+	networkFormDirty: false,
 	// Browser hostname and current connection detection
-	browser_hostname: null,
-	current_connection_adapter: null,
-	device_went_offline: false,
+	browserHostname: null,
+	currentConnectionAdapter: null,
+	deviceWentOffline: false,
 	// Network rollback modal state
-	should_show_rollback_modal: false,
-	default_rollback_enabled: true,
+	shouldShowRollbackModal: false,
+	defaultRollbackEnabled: true,
 	// Firmware upload state
-	firmware_upload_state: { type: 'idle' },
+	firmwareUploadState: { type: 'idle' },
 	// Overlay spinner state
-	overlay_spinner: { overlay: false, title: '', text: null, timed_out: false, progress: null, countdown_seconds: null },
+	overlaySpinner: { overlay: false, title: '', text: null, timedOut: false, progress: null, countdownSeconds: null },
 })
 
 /**

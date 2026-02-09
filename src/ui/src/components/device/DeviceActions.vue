@@ -16,7 +16,7 @@ const { loading, execute } = useAsyncAction({
 	onSuccess: closeAll
 })
 
-const factoryResetKeys = computed(() => viewModel.factory_reset)
+const factoryResetKeys = computed(() => viewModel.factoryReset)
 
 const handleReboot = () => execute(reboot)
 
@@ -27,45 +27,51 @@ const handleFactoryReset = () => execute(async () => {
 
 <template>
 	<div class="flex flex-col gap-y-4 items-start">
-		<div class="text-h4 text-secondary border-b w-100">Commands</div>
-		<v-btn :prepend-icon="'mdi-restart'" variant="text">
+		<div class="text-h5 text-secondary border-b w-100 pb-2 font-weight-bold">Commands</div>
+		<v-btn :prepend-icon="'mdi-restart'" color="primary" variant="flat" class="justify-start" density="compact" width="180">
 			Reboot
 			<v-dialog v-model="dialogs.reboot" activator="parent" max-width="340" :no-click-animation="true" persistent
 				@keydown.esc="dialogs.reboot = false">
-				<DialogContent title="Reboot device" dialog-type="default" :show-close="true"
-					@close="dialogs.reboot = false">
-					<div class="flex flex-col gap-2 mb-8">
+				<v-card>
+					<v-card-title class="text-h5">Reboot device</v-card-title>
+					<v-card-text>
 						Do you really want to restart the device?
-					</div>
-					<div class="flex justify-end -mr-4 mt-4">
-						<v-btn variant="text" color="warning" :loading="loading" :disabled="loading"
-							@click="handleReboot">Reboot</v-btn>
+					</v-card-text>
+					<v-card-actions>
+						<v-spacer></v-spacer>
 						<v-btn variant="text" color="primary" @click="dialogs.reboot = false">Cancel</v-btn>
-					</div>
-				</DialogContent>
+						<v-btn variant="flat" color="error" :loading="loading" :disabled="loading"
+							@click="handleReboot">Reboot</v-btn>
+					</v-card-actions>
+				</v-card>
 			</v-dialog>
 		</v-btn>
-		<v-btn :prepend-icon="'mdi-undo-variant'" variant="text">
+		<v-btn :prepend-icon="'mdi-undo-variant'" color="primary" variant="flat" class="justify-start" density="compact" width="180">
 			Factory Reset
 			<v-dialog v-model="dialogs.factoryReset" activator="parent" max-width="340" :no-click-animation="true"
 				persistent @keydown.esc="dialogs.factoryReset = false">
-				<DialogContent title="Factory reset" dialog-type="default" :show-close="true"
-					@close="dialogs.factoryReset = false">
-					<div class="flex flex-col gap-2 mb-8">
-						<div v-if="factoryResetKeys?.keys && factoryResetKeys.keys.length > 0">
-							<v-checkbox-btn v-for="(option, index) in factoryResetKeys.keys" :label="option"
-								v-model="selectedFactoryResetKeys" :value="option" :key="index"></v-checkbox-btn>
+				<v-card>
+					<v-card-title class="text-h5">Factory reset</v-card-title>
+					<v-card-text>
+						<div class="flex flex-col gap-2">
+							<div v-if="factoryResetKeys?.keys && factoryResetKeys.keys.length > 0">
+								<div class="text-subtitle-2 mb-2">Preserve options:</div>
+								<v-checkbox-btn v-for="(option, index) in factoryResetKeys.keys" :label="option"
+									v-model:model-value="selectedFactoryResetKeys" :value="option" :key="index"
+									density="compact"></v-checkbox-btn>
+							</div>
+							<div v-else class="text-grey text-italic">
+								No preserve options available
+							</div>
 						</div>
-						<div v-else class="text-grey">
-							No preserve options available
-						</div>
-					</div>
-					<div class="flex justify-end -mr-4 mt-4">
-						<v-btn variant="text" color="error" :loading="loading" :disabled="loading"
-							@click="handleFactoryReset">Reset</v-btn>
+					</v-card-text>
+					<v-card-actions>
+						<v-spacer></v-spacer>
 						<v-btn variant="text" color="primary" @click="dialogs.factoryReset = false">Cancel</v-btn>
-					</div>
-				</DialogContent>
+						<v-btn variant="flat" color="error" :loading="loading" :disabled="loading"
+							@click="handleFactoryReset">Reset</v-btn>
+					</v-card-actions>
+				</v-card>
 			</v-dialog>
 		</v-btn>
 	</div>

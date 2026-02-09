@@ -3,7 +3,7 @@ import { computed } from "vue"
 
 interface DialogProps {
 	title: string
-	dialogType?: "default" | "Warning" | "Error"
+	dialogType?: "default" | "Success" | "Warning" | "Error"
 	showClose?: boolean
 }
 
@@ -16,6 +16,8 @@ const emits = defineEmits<(e: "close") => void>()
 const dialogType = computed(() => props.dialogType ?? "default")
 const titleColor = computed(() => {
 	switch (dialogType.value) {
+		case "Success":
+			return "success"
 		case "Warning":
 			return "warning"
 		case "Error":

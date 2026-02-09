@@ -10,10 +10,6 @@ test('has title', async ({ page }) => {
 });
 
 test('login flow', async ({ page }) => {
-  // Listen for console logs
-  page.on('console', msg => console.log(`BROWSER LOG: ${msg.text()}`));
-  page.on('pageerror', err => console.log(`BROWSER ERROR: ${err}`));
-
   await mockConfig(page);
   await mockLoginSuccess(page);
   await mockRequireSetPassword(page);

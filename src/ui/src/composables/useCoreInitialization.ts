@@ -4,7 +4,6 @@ import { useCore } from './useCore'
 /**
  * Composable to automatically initialize the Crux Core on component mount
  *
- * This eliminates the need to manually call initialize() in every component.
  * Simply call this composable in your setup() function.
  *
  * @example

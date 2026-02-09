@@ -7,4 +7,5 @@
 pub mod auth;
 pub mod certificate;
 pub mod firmware;
+pub mod marker;
 pub mod network;

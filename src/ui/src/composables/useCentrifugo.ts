@@ -59,13 +59,11 @@ export function useCentrifuge() {
 
 	const fetchAndRefreshCentrifugeToken = async (): Promise<string> => {
 		try {
-			// Architectural Note: Ideally, all network effects would originate from the Core.
-			// However, Centrifuge's `getToken` callback expects a direct, synchronous-like
+			// Centrifuge's `getToken` callback expects a direct, synchronous-like
 			// Promise resolution. To avoid complex async state management and event routing
 			// through the Core for every token refresh, the Shell directly performs this
 			// network request. It uses the `authToken` from useCore (which is populated
-			// by the Core's LoginResponse) as a Bearer token, which is a more robust
-			// mechanism in some development environments than relying solely on session cookies.
+			// by the Core's LoginResponse) as a Bearer token.
 			if (!globalAuthTokenRef) {
 				console.error("fetchAndRefreshCentrifugeToken error: authTokenRef not set.")
 				return ""

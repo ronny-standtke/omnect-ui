@@ -211,15 +211,17 @@ export class NetworkTestHarness {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
-            version_info: {
+            versionInfo: {
               required: '>=0.39.0',
               current: '0.40.0',
               mismatch: false,
             },
-            update_validation_status: {
+            updateValidationStatus: {
               status: 'valid',
             },
-            network_rollback_occurred: this.networkRollbackOccurred,
+            networkRollbackOccurred: this.networkRollbackOccurred,
+            factoryResetResultAcked: true,
+            updateValidationAcked: true,
           }),
         });
       } else {
@@ -246,15 +248,46 @@ export class NetworkTestHarness {
   }
 
   /**
+   * Mock the /ack-factory-reset-result endpoint.
+   *
+   * @param page - Playwright page instance
+   */
+  async mockAckFactoryResetResult(page: Page): Promise<void> {
+    await page.route('**/ack-factory-reset-result', async (route) => {
+      if (route.request().method() === 'POST') {
+        await route.fulfill({
+          status: 200,
+        });
+      }
+    });
+  }
+
+  /**
+   * Mock the /ack-update-validation endpoint.
+   *
+   * @param page - Playwright page instance
+   */
+  async mockAckUpdateValidation(page: Page): Promise<void> {
+    await page.route('**/ack-update-validation', async (route) => {
+      if (route.request().method() === 'POST') {
+        await route.fulfill({
+          status: 200,
+        });
+      }
+    });
+  }
+
+  /**
    * Publish network status via Centrifugo WebSocket.
    * Updates are received by the UI and trigger network adapter list refresh.
    *
    * @param adapters - Array of network adapter configurations to publish
    */
-  async publishNetworkStatus(adapters: DeviceNetwork[]): Promise<void> {
-    this.lastNetworkConfig = adapters;
+  async publishNetworkStatus(adapters: Array<Partial<DeviceNetwork> & { name: string }>): Promise<void> {
+    const fullAdapters = adapters.map(adapter => this.createAdapter(adapter.name, adapter));
+    this.lastNetworkConfig = fullAdapters;
     await publishToCentrifugo('NetworkStatusV1', {
-      network_status: adapters,
+      network_status: fullAdapters,
     });
   }
 
@@ -351,15 +384,17 @@ export class NetworkTestHarness {
    * ```
    */
   createAdapter(name: string, config: Partial<DeviceNetwork> = {}): DeviceNetwork {
+    const defaultIpv4 = {
+      addrs: [{ addr: '192.168.1.100', dhcp: false, prefix_len: 24 }],
+      dns: ['8.8.8.8'],
+      gateways: ['192.168.1.1'],
+    };
+
     return {
       name,
       mac: config.mac || '00:11:22:33:44:55',
       online: config.online !== undefined ? config.online : true,
-      ipv4: config.ipv4 || {
-        addrs: [{ addr: '192.168.1.100', dhcp: false, prefix_len: 24 }],
-        dns: ['8.8.8.8'],
-        gateways: ['192.168.1.1'],
-      },
+      ipv4: config.ipv4 ? { ...defaultIpv4, ...config.ipv4 } : defaultIpv4,
     };
   }
 
@@ -457,10 +492,6 @@ export class NetworkTestHarness {
     try {
       await expect(tab).toBeVisible({ timeout: 10000 });
     } catch (e) {
-      console.error(`[Harness] Tab ${adapterName} NOT VISIBLE. Current URL: ${page.url()}`);
-      // Log some info about available tabs
-      const tabs = await page.locator('.v-tab').allTextContents();
-      console.log(`[Harness] Available tabs: ${tabs.join(', ')}`);
       throw e;
     }
 

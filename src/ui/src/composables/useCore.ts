@@ -1,9 +1,6 @@
 /**
  * Vue composable for integrating with Crux Core
  *
- * This file re-exports from the modular core/ directory for backward compatibility.
- * New code should import directly from './core' or './core/types'.
- *
  * @see ./core/index.ts - Main composable and public API
  * @see ./core/types.ts - Type definitions and conversions
  * @see ./core/state.ts - Singleton reactive state
@@ -17,7 +14,7 @@
 // Re-export everything from core/index.ts
 export { useCore } from './core'
 
-// Re-export types for backward compatibility
+// Re-export types
 export type {
 	ViewModel,
 	DeviceOperationStateType,
@@ -38,7 +35,8 @@ export type {
 	CoreViewModel,
 	UpdateManifest,
 	NetworkFormData,
+	DeviceNetwork,
 } from './core'
 
-// Re-export NetworkConfigRequest class for value usage
+// Re-export NetworkConfigRequest class
 export { NetworkConfigRequest } from './core'

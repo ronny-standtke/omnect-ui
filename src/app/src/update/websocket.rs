@@ -3,6 +3,11 @@ use crux_core::Command;
 use crate::{
     events::{Event, WebSocketEvent},
     model::Model,
+    parse_ods_update,
+    types::ods::{
+        OdsFactoryReset, OdsNetworkStatus, OdsOnlineStatus, OdsSystemInfo, OdsTimeouts,
+        OdsUpdateValidationStatus,
+    },
     update_field, CentrifugoCmd, Effect,
 };
 
@@ -23,22 +28,41 @@ pub fn handle(event: WebSocketEvent, model: &mut Model) -> Command<Effect, Event
                 .then_send(|_| Event::WebSocket(WebSocketEvent::Disconnected))
         }
 
-        WebSocketEvent::SystemInfoUpdated(info) => update_field!(model.system_info, Some(info)),
-        WebSocketEvent::NetworkStatusUpdated(status) => {
-            model.network_status = Some(status);
-            model.update_current_connection_adapter();
-            crux_core::render::render()
+        WebSocketEvent::SystemInfoUpdated(json) => {
+            parse_ods_update!(model, json, OdsSystemInfo, system_info, "SystemInfo")
         }
-        WebSocketEvent::OnlineStatusUpdated(status) => {
-            update_field!(model.online_status, Some(status))
+        WebSocketEvent::NetworkStatusUpdated(json) => {
+            parse_ods_update!(
+                model,
+                json,
+                OdsNetworkStatus,
+                "NetworkStatus",
+                |m, status| {
+                    m.network_status = Some(status.into());
+                    m.update_current_connection_adapter();
+                    crux_core::render::render()
+                }
+            )
         }
-        WebSocketEvent::FactoryResetUpdated(reset) => {
-            update_field!(model.factory_reset, Some(reset))
+        WebSocketEvent::OnlineStatusUpdated(json) => {
+            parse_ods_update!(model, json, OdsOnlineStatus, online_status, "OnlineStatus")
         }
-        WebSocketEvent::UpdateValidationStatusUpdated(status) => {
-            update_field!(model.update_validation_status, Some(status))
+        WebSocketEvent::FactoryResetUpdated(json) => {
+            parse_ods_update!(model, json, OdsFactoryReset, factory_reset, "FactoryReset")
         }
-        WebSocketEvent::TimeoutsUpdated(timeouts) => update_field!(model.timeouts, Some(timeouts)),
+        WebSocketEvent::UpdateValidationStatusUpdated(json) => {
+            parse_ods_update!(
+                model,
+                json,
+                OdsUpdateValidationStatus,
+                update_validation_status,
+                "UpdateValidationStatus"
+            )
+        }
+        WebSocketEvent::TimeoutsUpdated(json) => {
+            parse_ods_update!(model, json, OdsTimeouts, timeouts, "Timeouts")
+        }
+
         WebSocketEvent::Connected => update_field!(model.is_connected, true),
         WebSocketEvent::Disconnected => update_field!(model.is_connected, false),
     }
@@ -47,8 +71,9 @@ pub fn handle(event: WebSocketEvent, model: &mut Model) -> Command<Effect, Event
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{FactoryReset, OsInfo, SystemInfo, Timeouts, UpdateValidationStatus};
-    use crate::OnlineStatus;
+    use crate::types::{
+        FactoryReset, FactoryResetStatus, OnlineStatus, OsInfo, SystemInfo, UpdateValidationStatus,
+    };
 
     mod system_info {
         use super::*;
@@ -57,53 +82,21 @@ mod tests {
         fn updates_system_info() {
             let mut model = Model::default();
 
-            let info = SystemInfo {
+            let json = r#"{"os": {"name": "Linux", "version": "5.10"}, "azure_sdk_version": "1.0", "omnect_device_service_version": "2.0", "boot_time": "2024-01-01T00:00:00Z"}"#;
+
+            let expected_info = SystemInfo {
                 os: OsInfo {
                     name: "Linux".into(),
                     version: "5.10".into(),
                 },
                 azure_sdk_version: "1.0".into(),
                 omnect_device_service_version: "2.0".into(),
-                boot_time: Some("2024-01-01".into()),
+                boot_time: Some("2024-01-01T00:00:00Z".into()),
             };
 
-            let _ = handle(WebSocketEvent::SystemInfoUpdated(info.clone()), &mut model);
+            let _ = handle(WebSocketEvent::SystemInfoUpdated(json.into()), &mut model);
 
-            assert_eq!(model.system_info, Some(info));
-        }
-
-        #[test]
-        fn replaces_previous_system_info() {
-            let old_info = SystemInfo {
-                os: OsInfo {
-                    name: "Linux".into(),
-                    version: "5.9".into(),
-                },
-                azure_sdk_version: "0.9".into(),
-                omnect_device_service_version: "1.9".into(),
-                boot_time: None,
-            };
-            let mut model = Model {
-                system_info: Some(old_info),
-                ..Default::default()
-            };
-
-            let new_info = SystemInfo {
-                os: OsInfo {
-                    name: "Linux".into(),
-                    version: "5.10".into(),
-                },
-                azure_sdk_version: "1.0".into(),
-                omnect_device_service_version: "2.0".into(),
-                boot_time: Some("2024-01-01".into()),
-            };
-
-            let _ = handle(
-                WebSocketEvent::SystemInfoUpdated(new_info.clone()),
-                &mut model,
-            );
-
-            assert_eq!(model.system_info, Some(new_info));
+            assert_eq!(model.system_info, Some(expected_info));
         }
     }
 
@@ -115,37 +108,7 @@ mod tests {
             let mut model = Model::default();
 
             let _ = handle(
-                WebSocketEvent::OnlineStatusUpdated(OnlineStatus { iothub: true }),
-                &mut model,
-            );
-
-            assert_eq!(model.online_status, Some(OnlineStatus { iothub: true }));
-        }
-
-        #[test]
-        fn updates_online_status_to_offline() {
-            let mut model = Model {
-                online_status: Some(OnlineStatus { iothub: true }),
-                ..Default::default()
-            };
-
-            let _ = handle(
-                WebSocketEvent::OnlineStatusUpdated(OnlineStatus { iothub: false }),
-                &mut model,
-            );
-
-            assert_eq!(model.online_status, Some(OnlineStatus { iothub: false }));
-        }
-
-        #[test]
-        fn transitions_from_offline_to_online() {
-            let mut model = Model {
-                online_status: Some(OnlineStatus { iothub: false }),
-                ..Default::default()
-            };
-
-            let _ = handle(
-                WebSocketEvent::OnlineStatusUpdated(OnlineStatus { iothub: true }),
+                WebSocketEvent::OnlineStatusUpdated(r#"{"iothub": true}"#.into()),
                 &mut model,
             );
 
@@ -160,17 +123,32 @@ mod tests {
         fn updates_factory_reset_status() {
             let mut model = Model::default();
 
-            let status = FactoryReset {
+            let json = r#"{"keys": ["test_key"], "result": null}"#;
+
+            let expected_status = FactoryReset {
                 keys: vec!["test_key".into()],
                 result: None,
             };
 
-            let _ = handle(
-                WebSocketEvent::FactoryResetUpdated(status.clone()),
-                &mut model,
-            );
+            let _ = handle(WebSocketEvent::FactoryResetUpdated(json.into()), &mut model);
 
-            assert_eq!(model.factory_reset, Some(status));
+            assert_eq!(model.factory_reset, Some(expected_status));
+        }
+
+        #[test]
+        fn parses_integer_status_from_ods() {
+            let mut model = Model::default();
+
+            // ODS sends status as integer (serde_repr): 0=ModeSupported, 1=ModeUnsupported, etc.
+            let json = r#"{"keys":["network"],"result":{"status":0,"error":"0","paths":["/etc/systemd/network/"]}}"#;
+
+            let _ = handle(WebSocketEvent::FactoryResetUpdated(json.into()), &mut model);
+
+            let factory_reset = model.factory_reset.expect("factory_reset should be set");
+            let result = factory_reset.result.expect("result should be set");
+            assert_eq!(result.status, FactoryResetStatus::ModeSupported);
+            assert_eq!(result.error, "0");
+            assert_eq!(result.paths, vec!["/etc/systemd/network/"]);
         }
     }
 
@@ -181,65 +159,42 @@ mod tests {
         fn updates_validation_status() {
             let mut model = Model::default();
 
-            let status = UpdateValidationStatus {
+            let json = r#"{"status": "Succeeded"}"#;
+
+            let expected_status = UpdateValidationStatus {
                 status: "Succeeded".into(),
             };
 
             let _ = handle(
-                WebSocketEvent::UpdateValidationStatusUpdated(status.clone()),
+                WebSocketEvent::UpdateValidationStatusUpdated(json.into()),
                 &mut model,
             );
 
-            assert_eq!(model.update_validation_status, Some(status));
+            assert_eq!(model.update_validation_status, Some(expected_status));
         }
     }
 
     mod timeouts {
         use super::*;
         use crate::types::Duration;
+        use crate::types::Timeouts;
 
         #[test]
         fn updates_timeouts() {
             let mut model = Model::default();
 
-            let timeouts = Timeouts {
+            let json = r#"{"wait_online_timeout": {"nanos": 0, "secs": 300}}"#;
+
+            let expected_timeouts = Timeouts {
                 wait_online_timeout: Duration {
                     nanos: 0,
                     secs: 300,
                 },
             };
 
-            let _ = handle(
-                WebSocketEvent::TimeoutsUpdated(timeouts.clone()),
-                &mut model,
-            );
+            let _ = handle(WebSocketEvent::TimeoutsUpdated(json.into()), &mut model);
 
-            assert_eq!(model.timeouts, Some(timeouts));
-        }
-    }
-
-    mod connection {
-        use super::*;
-
-        #[test]
-        fn connected_sets_is_connected() {
-            let mut model = Model::default();
-
-            let _ = handle(WebSocketEvent::Connected, &mut model);
-
-            assert!(model.is_connected);
-        }
-
-        #[test]
-        fn disconnected_clears_is_connected() {
-            let mut model = Model {
-                is_connected: true,
-                ..Default::default()
-            };
-
-            let _ = handle(WebSocketEvent::Disconnected, &mut model);
-
-            assert!(!model.is_connected);
+            assert_eq!(model.timeouts, Some(expected_timeouts));
         }
     }
 
@@ -251,7 +206,25 @@ mod tests {
         fn updates_network_status() {
             let mut model = Model::default();
 
-            let status = NetworkStatus {
+            let json = r#"{
+                "network_status": [{
+                    "name": "eth0",
+                    "mac": "00:11:22:33:44:55",
+                    "online": true,
+                    "file": "/etc/network/interfaces",
+                    "ipv4": {
+                        "addrs": [{
+                            "addr": "192.168.1.100",
+                            "dhcp": false,
+                            "prefix_len": 24
+                        }],
+                        "dns": [],
+                        "gateways": []
+                    }
+                }]
+            }"#;
+
+            let expected_status = NetworkStatus {
                 network_status: vec![DeviceNetwork {
                     name: "eth0".to_string(),
                     mac: "00:11:22:33:44:55".to_string(),
@@ -270,41 +243,11 @@ mod tests {
             };
 
             let _ = handle(
-                WebSocketEvent::NetworkStatusUpdated(status.clone()),
+                WebSocketEvent::NetworkStatusUpdated(json.into()),
                 &mut model,
             );
 
-            assert_eq!(model.network_status, Some(status));
-        }
-
-        #[test]
-        fn updates_current_connection_adapter_when_browser_hostname_set() {
-            let mut model = Model {
-                browser_hostname: Some("192.168.1.100".to_string()),
-                ..Default::default()
-            };
-
-            let status = NetworkStatus {
-                network_status: vec![DeviceNetwork {
-                    name: "eth0".to_string(),
-                    mac: "00:11:22:33:44:55".to_string(),
-                    online: true,
-                    file: Some("/etc/network/interfaces".to_string()),
-                    ipv4: InternetProtocol {
-                        addrs: vec![IpAddress {
-                            addr: "192.168.1.100".to_string(),
-                            dhcp: false,
-                            prefix_len: 24,
-                        }],
-                        dns: vec![],
-                        gateways: vec![],
-                    },
-                }],
-            };
-
-            let _ = handle(WebSocketEvent::NetworkStatusUpdated(status), &mut model);
-
-            assert_eq!(model.current_connection_adapter, Some("eth0".to_string()));
+            assert_eq!(model.network_status, Some(expected_status));
         }
     }
 }

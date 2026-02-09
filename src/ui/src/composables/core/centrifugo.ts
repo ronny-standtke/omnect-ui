@@ -6,16 +6,7 @@
  */
 
 import { centrifugoInstance, wasmModule } from './state'
-import { stringToFactoryResetStatus } from './types'
 import { CentrifugeSubscriptionType } from '../../enums/centrifuge-subscription-type.enum'
-import type {
-	OdsOnlineStatus,
-	OdsSystemInfo,
-	OdsTimeouts,
-	OdsNetworkStatus,
-	OdsFactoryReset,
-	OdsUpdateValidationStatus,
-} from '../../types/ods'
 import {
 	EventVariantWebSocket,
 	WebSocketEventVariantOnlineStatusUpdated,
@@ -24,18 +15,6 @@ import {
 	WebSocketEventVariantFactoryResetUpdated,
 	WebSocketEventVariantUpdateValidationStatusUpdated,
 	WebSocketEventVariantTimeoutsUpdated,
-	OnlineStatus,
-	SystemInfo,
-	OsInfo,
-	NetworkStatus,
-	DeviceNetwork,
-	InternetProtocol,
-	IpAddress,
-	FactoryReset,
-	FactoryResetResult,
-	UpdateValidationStatus,
-	Timeouts,
-	Duration,
 	CentrifugoOperationVariantSubscribeAll,
 	CentrifugoOperationVariantUnsubscribeAll,
 	CentrifugoOutputVariantConnected,
@@ -70,8 +49,8 @@ export function setEffectsProcessor(callback: (effectsBytes: Uint8Array) => Prom
  *
  * Architecture:
  * - Receives JSON from Centrifugo WebSocket (ODS data format)
- * - Parses JSON and constructs typed TypeScript class instances
- * - Sends as *Updated events to Core (not responses)
+ * - Sends raw JSON string to Core
+ * - Core parses JSON and constructs internal types
  * - Core processes events, updates Model, and renders
  * - Shell reads updated viewModel from Core
  *
@@ -86,72 +65,28 @@ async function parseAndSendChannelEvent(channel: string, jsonData: string): Prom
 	try {
 		switch (channel) {
 			case 'OnlineStatusV1': {
-				const json = JSON.parse(jsonData) as OdsOnlineStatus
-				const data = new OnlineStatus(json.iothub)
-				await sendEventCallback(new EventVariantWebSocket(new WebSocketEventVariantOnlineStatusUpdated(data)))
+				await sendEventCallback(new EventVariantWebSocket(new WebSocketEventVariantOnlineStatusUpdated(jsonData)))
 				break
 			}
 			case 'SystemInfoV1': {
-				const json = JSON.parse(jsonData) as OdsSystemInfo
-				const data = new SystemInfo(
-					new OsInfo(json.os?.name || '', json.os?.version || ''),
-					json.azure_sdk_version || '',
-					json.omnect_device_service_version || '',
-					json.boot_time ? String(json.boot_time) : null
-				)
-				await sendEventCallback(new EventVariantWebSocket(new WebSocketEventVariantSystemInfoUpdated(data)))
+				await sendEventCallback(new EventVariantWebSocket(new WebSocketEventVariantSystemInfoUpdated(jsonData)))
 				break
 			}
 			case 'TimeoutsV1': {
-				const json = JSON.parse(jsonData) as OdsTimeouts
-				const data = new Timeouts(
-					new Duration(json.wait_online_timeout?.nanos || 0, BigInt(json.wait_online_timeout?.secs || 0))
-				)
-				await sendEventCallback(new EventVariantWebSocket(new WebSocketEventVariantTimeoutsUpdated(data)))
+				await sendEventCallback(new EventVariantWebSocket(new WebSocketEventVariantTimeoutsUpdated(jsonData)))
 				break
 			}
 			case 'NetworkStatusV1': {
-				const json = JSON.parse(jsonData) as OdsNetworkStatus
-				console.log('NetworkStatusV1 WebSocket update received:', json)
-				const networks = (json.network_status || []).map((net) => {
-					console.log('Network adapter:', net.name, 'dhcp:', net.ipv4?.addrs[0]?.dhcp)
-					return new DeviceNetwork(
-						new InternetProtocol(
-							(net.ipv4?.addrs || []).map(
-								(addr) => new IpAddress(addr.addr || '', addr.dhcp || false, addr.prefix_len || 0)
-							),
-							net.ipv4?.dns || [],
-							net.ipv4?.gateways || []
-						),
-						net.mac || '',
-						net.name || '',
-						net.online || false,
-						net.file || null
-					)
-				})
-				const data = new NetworkStatus(networks)
-				await sendEventCallback(new EventVariantWebSocket(new WebSocketEventVariantNetworkStatusUpdated(data)))
+				await sendEventCallback(new EventVariantWebSocket(new WebSocketEventVariantNetworkStatusUpdated(jsonData)))
 				break
 			}
 			case 'FactoryResetV1': {
-				const json = JSON.parse(jsonData) as OdsFactoryReset
-				const result = json.result
-					? new FactoryResetResult(
-							stringToFactoryResetStatus(json.result.status || 'unknown'),
-							json.result.context || null,
-							json.result.error || '',
-							json.result.paths || []
-						)
-					: null
-				const data = new FactoryReset(json.keys || [], result)
-				await sendEventCallback(new EventVariantWebSocket(new WebSocketEventVariantFactoryResetUpdated(data)))
+				await sendEventCallback(new EventVariantWebSocket(new WebSocketEventVariantFactoryResetUpdated(jsonData)))
 				break
 			}
 			case 'UpdateValidationStatusV1': {
-				const json = JSON.parse(jsonData) as OdsUpdateValidationStatus
-				const data = new UpdateValidationStatus(json.status || '')
 				await sendEventCallback(
-					new EventVariantWebSocket(new WebSocketEventVariantUpdateValidationStatusUpdated(data))
+					new EventVariantWebSocket(new WebSocketEventVariantUpdateValidationStatusUpdated(jsonData))
 				)
 				break
 			}
@@ -169,8 +104,6 @@ async function parseAndSendChannelEvent(channel: string, jsonData: string): Prom
  * Subscribes to all Centrifugo channels and forwards messages as events to Core.
  * Uses the event-based architecture where WebSocket data is parsed and sent as
  * typed events (*Updated) rather than responses.
- *
- * Note: Only SubscribeAll is implemented - individual channel operations removed.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function executeCentrifugoOperation(requestId: number, operation: any): Promise<void> {

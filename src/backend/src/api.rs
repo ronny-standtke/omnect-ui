@@ -6,37 +6,21 @@ use crate::{
     services::{
         auth::{AuthorizationService, PasswordService, TokenManager},
         firmware::FirmwareService,
-        network::{NetworkConfigService, SetNetworkConfigRequest},
+        marker,
+        network::{NetworkConfigRequest, NetworkConfigService},
     },
 };
 use actix_files::NamedFile;
-use actix_multipart::form::{MultipartForm, tempfile::TempFile};
+use actix_multipart::Multipart;
 use actix_session::Session;
 use actix_web::{HttpResponse, Responder, web};
 use anyhow::Result;
+use futures_util::StreamExt;
 use log::{debug, error};
-use serde::Deserialize;
+pub use omnect_ui_core::types::{SetPasswordRequest, UpdatePasswordRequest};
 use std::collections::HashMap;
 
 pub type StaticResources = HashMap<&'static str, static_files::Resource>;
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetPasswordPayload {
-    password: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdatePasswordPayload {
-    current_password: String,
-    password: String,
-}
-
-#[derive(MultipartForm)]
-pub struct UploadFormSingleFile {
-    file: TempFile,
-}
 
 #[derive(Clone)]
 pub struct Api<ServiceClient, SingleSignOn>
@@ -108,6 +92,7 @@ where
     ) -> impl Responder {
         debug!("factory_reset() called: {body:?}");
 
+        marker::FACTORY_RESET_RESULT_ACKED.clear();
         let result = api.service_client.factory_reset(body.into_inner()).await;
 
         if result.is_ok() {
@@ -139,15 +124,24 @@ where
         HttpResponse::Ok().body(env!("CARGO_PKG_VERSION"))
     }
 
-    pub async fn upload_firmware_file(
-        MultipartForm(form): MultipartForm<UploadFormSingleFile>,
-    ) -> impl Responder {
+    pub async fn upload_firmware_file(mut payload: Multipart) -> impl Responder {
         debug!("upload_firmware_file() called");
 
-        handle_service_result(
-            FirmwareService::handle_uploaded_firmware(form.file),
-            "upload_firmware_file",
-        )
+        while let Some(item) = payload.next().await {
+            let field = match item {
+                Ok(field) => field,
+                Err(e) => return HttpResponse::BadRequest().body(e.to_string()),
+            };
+
+            if field.name() == Some("file") {
+                return handle_service_result(
+                    FirmwareService::receive_firmware(field).await,
+                    "upload_firmware_file",
+                );
+            }
+        }
+
+        HttpResponse::BadRequest().body("Missing file field")
     }
 
     pub async fn load_update(api: web::Data<Self>) -> impl Responder {
@@ -161,6 +155,7 @@ where
 
     pub async fn run_update(body: web::Json<RunUpdate>, api: web::Data<Self>) -> impl Responder {
         debug!("run_update() called with validate_iothub_connection: {body:?}");
+        marker::UPDATE_VALIDATION_ACKED.clear();
         handle_service_result(
             FirmwareService::run_update(&api.service_client, body.into_inner()).await,
             "run_update",
@@ -168,7 +163,7 @@ where
     }
 
     pub async fn set_password(
-        body: web::Json<SetPasswordPayload>,
+        body: web::Json<SetPasswordRequest>,
         session: Session,
         token_manager: web::Data<TokenManager>,
     ) -> impl Responder {
@@ -189,7 +184,7 @@ where
     }
 
     pub async fn update_password(
-        body: web::Json<UpdatePasswordPayload>,
+        body: web::Json<UpdatePasswordRequest>,
         session: Session,
     ) -> impl Responder {
         debug!("update_password() called");
@@ -233,7 +228,7 @@ where
     }
 
     pub async fn set_network_config(
-        network_config: web::Json<SetNetworkConfigRequest>,
+        network_config: web::Json<NetworkConfigRequest>,
         api: web::Data<Self>,
     ) -> impl Responder {
         debug!("set_network_config() called");
@@ -246,7 +241,19 @@ where
 
     pub async fn ack_rollback() -> impl Responder {
         debug!("ack_rollback() called");
-        NetworkConfigService::clear_rollback_occurred();
+        marker::NETWORK_ROLLBACK_OCCURRED.clear();
+        HttpResponse::Ok().finish()
+    }
+
+    pub async fn ack_factory_reset_result() -> impl Responder {
+        debug!("ack_factory_reset_result() called");
+        marker::FACTORY_RESET_RESULT_ACKED.set_or_log();
+        HttpResponse::Ok().finish()
+    }
+
+    pub async fn ack_update_validation() -> impl Responder {
+        debug!("ack_update_validation() called");
+        marker::UPDATE_VALIDATION_ACKED.set_or_log();
         HttpResponse::Ok().finish()
     }
 

@@ -88,8 +88,6 @@ impl PasswordService {
         let password_file = &AppConfig::get().paths.password_file;
         let hash = Self::hash_password(password)?;
 
-        // Atomic write pattern: write to temp file, sync, then rename
-        // Retry strategy to handle potential transient filesystem issues OR verification failure
         let max_retries = 3;
         let mut last_error = anyhow!("Unknown error");
 
@@ -153,7 +151,6 @@ mod tests {
     fn test_store_and_check_password() {
         let _lock = PasswordService::lock_for_test();
 
-        // This test relies on AppConfig which is initialized in test mode with temp directories
         // Clean up any existing password file first
         let password_file = &AppConfig::get().paths.password_file;
         let _ = std::fs::remove_file(password_file);

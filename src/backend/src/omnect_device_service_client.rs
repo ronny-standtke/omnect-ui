@@ -3,7 +3,7 @@
 use crate::{
     config::AppConfig,
     http_client::{handle_http_response, unix_socket_client},
-    services::network::NetworkConfigService,
+    services::marker,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use log::info;
@@ -53,6 +53,7 @@ pub struct Status {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateValidationStatus {
     pub status: String,
 }
@@ -88,6 +89,7 @@ pub struct Ipv4AddrInfo {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VersionInfo {
     pub required: String,
     pub current: String,
@@ -95,19 +97,24 @@ pub struct VersionInfo {
 }
 
 #[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct HealthcheckInfo {
     pub version_info: VersionInfo,
     pub update_validation_status: UpdateValidationStatus,
     pub network_rollback_occurred: bool,
+    pub factory_reset_result_acked: bool,
+    pub update_validation_acked: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HeaderKeyValue {
     pub name: String,
     pub value: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublishEndpoint {
     pub url: String,
     pub headers: Vec<HeaderKeyValue>,
@@ -139,6 +146,13 @@ pub trait DeviceServiceClient {
     async fn run_update(&self, run_update: RunUpdate) -> Result<()>;
     async fn healthcheck_info(&self) -> Result<HealthcheckInfo>;
     async fn shutdown(&self) -> Result<()>;
+}
+
+#[cfg(feature = "mock")]
+impl Clone for MockDeviceServiceClient {
+    fn clone(&self) -> Self {
+        Self::new()
+    }
 }
 
 impl OmnectDeviceServiceClient {
@@ -310,7 +324,9 @@ impl DeviceServiceClient for OmnectDeviceServiceClient {
                 mismatch: !required_version.matches(&parsed_current),
             },
             update_validation_status: status.update_validation_status,
-            network_rollback_occurred: NetworkConfigService::rollback_occurred(),
+            network_rollback_occurred: marker::NETWORK_ROLLBACK_OCCURRED.exists(),
+            factory_reset_result_acked: marker::FACTORY_RESET_RESULT_ACKED.exists(),
+            update_validation_acked: marker::UPDATE_VALIDATION_ACKED.exists(),
         })
     }
 
@@ -458,11 +474,8 @@ mod tests {
 
         #[test]
         fn healthcheck_includes_network_rollback_status() {
-            // This tests that the healthcheck info construction includes
-            // the network rollback occurred flag from NetworkConfigService
-            let _rollback_occurred = NetworkConfigService::rollback_occurred();
-
-            // The value depends on filesystem state, just verify it's callable without panicking
+            // Verify marker file check is callable without panicking
+            let _rollback_occurred = marker::NETWORK_ROLLBACK_OCCURRED.exists();
         }
     }
 

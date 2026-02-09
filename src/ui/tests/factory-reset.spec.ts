@@ -79,13 +79,10 @@ test.describe('Device Factory Reset', () => {
     await expect(page.getByText('The device is resetting')).toBeVisible();
 
     // Wait for timeout
-    // NOTE: Factory reset timeout is normally 10 minutes. 
-    // We need to make sure we are using the shortened timeout in the test environment.
+    // Wait for timeout (countdown comes from Core's overlay spinner)
     await page.waitForTimeout(1000);
 
     // Verify timeout message
-    // The exact text comes from Rust: 
-    // "Device did not come back online after 10 minutes. Please check the device manually."
-    await expect(page.getByText('Device did not come back online after 10 minutes')).toBeVisible();
+    await expect(page.getByText('Device did not come back online. You may need to re-accept the security certificate.')).toBeVisible();
   });
 });

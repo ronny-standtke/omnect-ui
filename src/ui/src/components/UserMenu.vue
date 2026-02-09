@@ -32,9 +32,9 @@ const logOut = async () => {
 			<v-card-text class="mt-2">
 				<div class="flex justify-space-between items-center">
 					<v-btn type="button" text="Change password" prepend-icon="mdi-lock-outline" variant="text"
-						color="default" @click="$router.push('/update-password')">
+						color="primary" @click="$router.push('/update-password')">
 					</v-btn>
-					<v-btn type="button" text="logout" prepend-icon="mdi-logout" variant="text" color="default"
+					<v-btn type="button" text="logout" prepend-icon="mdi-logout" variant="text" color="primary"
 						@click="logOut">
 					</v-btn>
 				</div>

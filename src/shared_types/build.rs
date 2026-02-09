@@ -32,6 +32,14 @@ fn main() -> Result<()> {
     gen.register_type::<NetworkConfigRequest>()?;
     gen.register_type::<NetworkFormData>()?;
 
+    // Register ODS types
+    gen.register_type::<omnect_ui_core::types::OdsOnlineStatus>()?;
+    gen.register_type::<omnect_ui_core::types::OdsSystemInfo>()?;
+    gen.register_type::<omnect_ui_core::types::OdsTimeouts>()?;
+    gen.register_type::<omnect_ui_core::types::OdsNetworkStatus>()?;
+    gen.register_type::<omnect_ui_core::types::OdsFactoryReset>()?;
+    gen.register_type::<omnect_ui_core::types::OdsUpdateValidationStatus>()?;
+
     let output_root = PathBuf::from("./generated");
 
     gen.typescript("shared_types", output_root.join("typescript"))?;
