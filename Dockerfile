@@ -85,8 +85,8 @@ COPY --from=vue-build /usr/src/app/dist ./src/ui/dist
 # Build omnect-ui for target architecture with embedded frontend
 # Cache mounts persist compiled dependencies across builds
 # Pass GIT_SHORT_REV as environment variable to avoid copying .git directory
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/work/build \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-${TARGETARCH} \
+    --mount=type=cache,target=/work/build,id=cargo-build-${TARGETARCH} \
     GIT_SHORT_REV=${GIT_SHORT_REV} cargo build ${OMNECT_UI_BUILD_ARG} --release -p omnect-ui --target-dir ./build && \
     cp ./build/release/omnect-ui /work/omnect-ui-bin
 
