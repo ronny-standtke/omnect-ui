@@ -23,9 +23,9 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("facet_typ
 [dependencies]
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 console_log = { version = "1.0", default-features = false }
-crux_core = { version = "0.17.0-rc2" }
+crux_core = { version = "0.17.0-rc2", default-features = false }
 crux_http = { version = "0.16.0-rc2", default-features = false }
-crux_macros = { version = "0.8.0-rc2" }
+crux_macros = { version = "0.8.0-rc2", default-features = false }
 lazy_static = { version = "1.4", default-features = false }
 log = { version = "0.4", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"] }

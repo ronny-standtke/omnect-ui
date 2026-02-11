@@ -52,6 +52,8 @@ COPY --from=vue-install /tmp/node_modules node_modules
 # Remove CommonJS .js files so Vite uses the TypeScript source directly
 RUN find ../shared_types/generated/typescript -name "*.js" -delete
 RUN bun run build
+# Generate stripped package.json (runtime deps only) for SBOM generation
+RUN echo 'const p = JSON.parse(await Bun.file("package.json").text()); delete p.devDependencies; delete p.scripts; await Bun.write("/tmp/sbom-package.json", JSON.stringify(p, null, 2));' | bun run -
 
 # Stage 5: Build Rust backend for target architecture with embedded frontend
 FROM ${DOCKER_NAMESPACE}/rust:bookworm AS builder
@@ -87,7 +89,7 @@ COPY --from=vue-build /usr/src/app/dist ./src/ui/dist
 # Pass GIT_SHORT_REV as environment variable to avoid copying .git directory
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-${TARGETARCH} \
     --mount=type=cache,target=/work/build,id=cargo-build-${TARGETARCH} \
-    GIT_SHORT_REV=${GIT_SHORT_REV} cargo build ${OMNECT_UI_BUILD_ARG} --release -p omnect-ui --target-dir ./build && \
+    GIT_SHORT_REV=${GIT_SHORT_REV} cargo auditable build ${OMNECT_UI_BUILD_ARG} --release -p omnect-ui --target-dir ./build && \
     cp ./build/release/omnect-ui /work/omnect-ui-bin
 
 SHELL ["/bin/bash", "-c"]
@@ -142,6 +144,9 @@ COPY --from=builder /work/omnect-ui-bin /omnect-ui
 COPY --from=builder /work/centrifugo /
 COPY --from=builder /copy/lib/ /lib/
 COPY --from=builder /copy/status.d /var/lib/dpkg/status.d
+# npm runtime metadata for SBOM generation (stripped of devDependencies)
+COPY --from=vue-build /tmp/sbom-package.json /sbom/npm/package.json
+COPY --from=vue-build /usr/src/app/bun.lock /sbom/npm/bun.lock
 
 WORKDIR "/"
 COPY src/backend/config/centrifugo_config.json /
