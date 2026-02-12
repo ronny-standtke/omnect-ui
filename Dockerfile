@@ -69,7 +69,7 @@ ARG OMNECT_UI_BUILD_ARG=""
 ARG GIT_SHORT_REV="unknown"
 WORKDIR "/work"
 
-ARG CENTRIFUGO_VERSION=v6.1.0
+ARG CENTRIFUGO_VERSION=v6.6.0
 
 RUN curl -sSLf https://centrifugal.dev/install.sh | sh
 
