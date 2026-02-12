@@ -1,10 +1,20 @@
 use anyhow::Result;
-use jwt_simple::prelude::*;
+use jsonwebtoken::{
+    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode, get_current_timestamp,
+};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 const TOKEN_SUBJECT: &str = "omnect-ui";
 const TOKEN_EXPIRE_HOURS: u64 = 2;
-const TOKEN_TIME_TOLERANCE_MINS: u64 = 15;
+const TOKEN_TIME_TOLERANCE_SECS: u64 = 15 * 60;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    iat: u64,
+    exp: u64,
+}
 
 /// Centralized token management for session tokens
 ///
@@ -20,7 +30,7 @@ pub struct TokenManager {
 }
 
 struct TokenManagerInner {
-    key: HS256Key,
+    key: Vec<u8>,
 }
 
 impl TokenManager {
@@ -31,7 +41,7 @@ impl TokenManager {
     pub fn new(secret: &str) -> Self {
         Self {
             inner: Arc::new(TokenManagerInner {
-                key: HS256Key::from_bytes(secret.as_bytes()),
+                key: secret.as_bytes().to_vec(),
             }),
         }
     }
@@ -40,13 +50,21 @@ impl TokenManager {
     ///
     /// Returns a signed JWT token string
     pub fn create_token(&self) -> Result<String> {
-        let claims =
-            Claims::create(Duration::from_hours(TOKEN_EXPIRE_HOURS)).with_subject(TOKEN_SUBJECT);
+        let iat = get_current_timestamp();
+        let exp = iat + TOKEN_EXPIRE_HOURS * 3600;
 
-        self.inner
-            .key
-            .authenticate(claims)
-            .map_err(|e| anyhow::anyhow!("failed to create token: {e:#}"))
+        let claims = Claims {
+            sub: TOKEN_SUBJECT.to_string(),
+            iat,
+            exp,
+        };
+
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(&self.inner.key),
+        )
+        .map_err(|e| anyhow::anyhow!("failed to create token: {e:#}"))
     }
 
     /// Verify a token and check if it's valid
@@ -54,23 +72,21 @@ impl TokenManager {
     /// Validates:
     /// - Signature
     /// - Expiration (with configurable time tolerance)
-    /// - Max validity (token age)
     /// - Required subject claim
     ///
     /// Returns true if token is valid, false otherwise
     pub fn verify_token(&self, token: &str) -> bool {
-        let options = VerificationOptions {
-            accept_future: true,
-            time_tolerance: Some(Duration::from_mins(TOKEN_TIME_TOLERANCE_MINS)),
-            max_validity: Some(Duration::from_hours(TOKEN_EXPIRE_HOURS)),
-            required_subject: Some(TOKEN_SUBJECT.to_string()),
-            ..Default::default()
-        };
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.leeway = TOKEN_TIME_TOLERANCE_SECS;
+        validation.sub = Some(TOKEN_SUBJECT.to_string());
+        validation.validate_exp = true;
 
-        self.inner
-            .key
-            .verify_token::<NoCustomClaims>(token, Some(options))
-            .is_ok()
+        decode::<Claims>(
+            token,
+            &DecodingKey::from_secret(&self.inner.key),
+            &validation,
+        )
+        .is_ok()
     }
 }
 

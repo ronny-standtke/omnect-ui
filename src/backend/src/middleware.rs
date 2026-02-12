@@ -151,92 +151,66 @@ pub mod tests {
     };
     use actix_web_httpauth::headers::authorization::Basic;
     use base64::prelude::*;
-    use jwt_simple::claims::{JWTClaims, NoCustomClaims};
-    use jwt_simple::prelude::*;
+    use jsonwebtoken::{EncodingKey, Header, encode, get_current_timestamp};
+    use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
 
-    fn generate_valid_claim() -> JWTClaims<NoCustomClaims> {
-        let issued_at = Clock::now_since_epoch();
-        let expires_at = issued_at
-            .checked_add(Duration::from_hours(TOKEN_EXPIRE_HOURS))
-            .unwrap();
+    #[derive(Debug, Serialize, Deserialize)]
+    struct TestClaims {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sub: Option<String>,
+        iat: u64,
+        exp: u64,
+    }
 
-        JWTClaims {
-            issued_at: Some(issued_at),
-            expires_at: Some(expires_at),
-            invalid_before: None,
-            issuer: None,
-            subject: Some(TOKEN_SUBJECT.to_string()),
-            audiences: None,
-            jwt_id: None,
-            nonce: None,
-            custom: NoCustomClaims {},
+    fn generate_valid_claim() -> TestClaims {
+        let iat = get_current_timestamp();
+        let exp = iat + TOKEN_EXPIRE_HOURS * 3600;
+
+        TestClaims {
+            iat,
+            exp,
+            sub: Some(TOKEN_SUBJECT.to_string()),
         }
     }
 
-    fn generate_expired_claim() -> JWTClaims<NoCustomClaims> {
-        let now = Clock::now_since_epoch();
-        let issued_at = now
-            .checked_sub(Duration::from_hours(2 * TOKEN_EXPIRE_HOURS))
-            .unwrap();
-        let expires_at = now
-            .checked_sub(Duration::from_hours(TOKEN_EXPIRE_HOURS))
-            .unwrap();
+    fn generate_expired_claim() -> TestClaims {
+        let now = get_current_timestamp();
+        let iat = now - 2 * TOKEN_EXPIRE_HOURS * 3600;
+        let exp = now - TOKEN_EXPIRE_HOURS * 3600;
 
-        JWTClaims {
-            issued_at: Some(issued_at),
-            expires_at: Some(expires_at),
-            invalid_before: None,
-            issuer: None,
-            subject: Some(TOKEN_SUBJECT.to_string()),
-            audiences: None,
-            jwt_id: None,
-            nonce: None,
-            custom: NoCustomClaims {},
+        TestClaims {
+            iat,
+            exp,
+            sub: Some(TOKEN_SUBJECT.to_string()),
         }
     }
 
-    fn generate_invalid_subject_claim() -> JWTClaims<NoCustomClaims> {
-        let issued_at = Clock::now_since_epoch();
-        let expires_at = issued_at
-            .checked_add(Duration::from_hours(TOKEN_EXPIRE_HOURS))
-            .unwrap();
+    fn generate_invalid_subject_claim() -> TestClaims {
+        let iat = get_current_timestamp();
+        let exp = iat + TOKEN_EXPIRE_HOURS * 3600;
 
-        JWTClaims {
-            issued_at: Some(issued_at),
-            expires_at: Some(expires_at),
-            invalid_before: None,
-            issuer: None,
-            subject: Some("some_unknown_subject".to_string()),
-            audiences: None,
-            jwt_id: None,
-            nonce: None,
-            custom: NoCustomClaims {},
+        TestClaims {
+            iat,
+            exp,
+            sub: Some("some_unknown_subject".to_string()),
         }
     }
 
-    fn generate_unset_subject_claim() -> JWTClaims<NoCustomClaims> {
-        let issued_at = Clock::now_since_epoch();
-        let expires_at = issued_at
-            .checked_add(Duration::from_hours(TOKEN_EXPIRE_HOURS))
-            .unwrap();
+    fn generate_unset_subject_claim() -> TestClaims {
+        let iat = get_current_timestamp();
+        let exp = iat + TOKEN_EXPIRE_HOURS * 3600;
 
-        JWTClaims {
-            issued_at: Some(issued_at),
-            expires_at: Some(expires_at),
-            invalid_before: None,
-            issuer: None,
-            subject: None,
-            audiences: None,
-            jwt_id: None,
-            nonce: None,
-            custom: NoCustomClaims {},
+        TestClaims {
+            iat,
+            exp,
+            sub: None,
         }
     }
 
-    fn generate_token(claim: JWTClaims<NoCustomClaims>) -> String {
-        let key = HS256Key::from_bytes(AppConfig::get().centrifugo.client_token.as_bytes());
-        key.authenticate(claim).unwrap()
+    fn generate_token(claim: TestClaims) -> String {
+        let key = EncodingKey::from_secret(AppConfig::get().centrifugo.client_token.as_bytes());
+        encode(&Header::default(), &claim, &key).unwrap()
     }
 
     async fn index() -> impl Responder {
@@ -286,10 +260,8 @@ pub mod tests {
         let mut private_jar = cookie_jar.private_mut(&key);
         let session_store = CookieSessionStore::default();
 
-        let ttl = Clock::now_since_epoch()
-            .checked_add(Duration::from_hours(2))
-            .unwrap();
-        let ttl = actix_web::cookie::time::Duration::seconds(ttl.as_secs().try_into().unwrap());
+        let ttl = get_current_timestamp() + 2 * 3600;
+        let ttl = actix_web::cookie::time::Duration::seconds(ttl.try_into().unwrap());
 
         let session_value = session_store
             .save(

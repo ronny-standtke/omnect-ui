@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use anyhow::{Context, Result};
 use base64::{Engine, prelude::BASE64_STANDARD};
-use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 #[cfg(feature = "mock")]
 use mockall::automock;
 use reqwest::Client;
@@ -48,7 +48,7 @@ impl KeycloakProvider {
             .context("failed to write frontend config file")
     }
 
-    async fn realm_public_key(&self) -> Result<RS256PublicKey> {
+    async fn realm_public_key(&self) -> Result<DecodingKey> {
         let client = Client::new();
         let resp = client
             .get(&AppConfig::get().keycloak.url)
@@ -63,14 +63,20 @@ impl KeycloakProvider {
             .decode(resp.public_key.as_bytes())
             .context("failed to decode public key from base64")?;
 
-        RS256PublicKey::from_der(&decoded).context("failed to parse public key from DER format")
+        Ok(DecodingKey::from_rsa_der(&decoded))
     }
 }
 
 impl SingleSignOnProvider for KeycloakProvider {
     async fn verify_token(&self, token: &str) -> anyhow::Result<TokenClaims> {
         let pub_key = self.realm_public_key().await?;
-        let claims = pub_key.verify_token::<TokenClaims>(token, None)?;
-        Ok(claims.custom)
+        let mut validation = Validation::new(Algorithm::RS256);
+        // Keycloak tokens usually have these, but we don't strictly require them here
+        // as we only care about the custom claims if the token is valid.
+        validation.validate_exp = true;
+        validation.required_spec_claims.remove("iss"); // issuer might vary
+
+        let claims = decode::<TokenClaims>(token, &pub_key, &validation)?;
+        Ok(claims.claims)
     }
 }
