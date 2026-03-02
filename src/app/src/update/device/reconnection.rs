@@ -646,7 +646,10 @@ mod tests {
                 );
 
                 assert_eq!(model.update_manifest, Some(manifest));
-                assert_eq!(model.firmware_upload_state, crate::types::UploadState::Completed);
+                assert_eq!(
+                    model.firmware_upload_state,
+                    crate::types::UploadState::Completed
+                );
             }
         }
 
@@ -810,7 +813,10 @@ mod tests {
                 );
 
                 assert_eq!(model.update_manifest, Some(manifest));
-                assert_eq!(model.firmware_upload_state, crate::types::UploadState::Completed);
+                assert_eq!(
+                    model.firmware_upload_state,
+                    crate::types::UploadState::Completed
+                );
             }
         }
 
