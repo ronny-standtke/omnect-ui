@@ -68,7 +68,7 @@ ARG TARGETARCH
 ARG OMNECT_UI_BUILD_ARG=""
 WORKDIR "/work"
 
-ARG CENTRIFUGO_VERSION=v6.6.0
+ARG CENTRIFUGO_VERSION=v6.6.2
 
 RUN curl -sSLf https://centrifugal.dev/install.sh | sh
 
