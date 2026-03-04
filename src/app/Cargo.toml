@@ -10,9 +10,6 @@ license.workspace = true
 repository.workspace = true
 version.workspace = true
 
-[package.metadata.wasm-pack.profile.release]
-wasm-opt = false
-
 [lib]
 crate-type = ["lib", "cdylib"]
 name = "omnect_ui_core"

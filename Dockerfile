@@ -87,8 +87,8 @@ COPY --from=vue-build /usr/src/app/dist ./src/ui/dist
 # Cache mounts persist compiled dependencies across builds
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-${TARGETARCH} \
     --mount=type=cache,target=/work/build,id=cargo-build-${TARGETARCH} \
-    cargo auditable build ${OMNECT_UI_BUILD_ARG} --release -p omnect-ui --target-dir ./build && \
-    cp ./build/release/omnect-ui /work/omnect-ui-bin
+    cargo auditable build ${OMNECT_UI_BUILD_ARG} --profile dist -p omnect-ui --target-dir ./build && \
+    cp ./build/dist/omnect-ui /work/omnect-ui-bin
 
 SHELL ["/bin/bash", "-c"]
 RUN <<EOT

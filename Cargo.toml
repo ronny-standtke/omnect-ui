@@ -12,12 +12,13 @@ default-members = [
     "src/app",
 ]
 
-[profile.release]
+[profile.dist]
+inherits = "release"
 opt-level = "z"     # Optimize for minimum binary size
-lto = "fat"         # Enable Link-Time Optimization (removes dead code across crate boundaries)
-codegen-units = 1   # Maximize optimization at the cost of slower compile times
-strip = true        # Strip debug symbols and DWARF tables from the final binary
-panic = "abort"     # Remove unwinding code to reduce binary size
+lto = "fat"         # Enable aggressive Fat LTO for production builds
+codegen-units = 1   # Maximize optimization for production
+strip = true        # Strip debug symbols
+panic = "abort"     # Remove unwinding code to further reduce size
 
 [workspace.package]
 authors = ["omnect@conplement.de"]
