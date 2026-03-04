@@ -65,6 +65,7 @@ export function updateViewModelFromCore(): void {
 				azureSdkVersion: coreViewModel.systemInfo.azureSdkVersion,
 				omnectDeviceServiceVersion: coreViewModel.systemInfo.omnectDeviceServiceVersion,
 				bootTime: coreViewModel.systemInfo.bootTime || null,
+				hostname: coreViewModel.systemInfo.hostname,
 			}
 		} else {
 			viewModel.systemInfo = null

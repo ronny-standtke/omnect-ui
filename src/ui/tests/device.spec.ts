@@ -16,6 +16,7 @@ test.describe('Device Info', () => {
       azure_sdk_version: '0.1.0',
       omnect_device_service_version: '4.5.6',
       boot_time: new Date().toISOString(),
+      hostname: 'omnect-device',
     };
 
     // Publish to Centrifugo
@@ -26,5 +27,6 @@ test.describe('Device Info', () => {
     await expect(page.getByText('Omnect OS')).toBeVisible();
     await expect(page.getByText('1.2.3')).toBeVisible();
     await expect(page.getByText('4.5.6')).toBeVisible();
+    await expect(page.getByText('omnect-device')).toBeVisible();
   });
 });

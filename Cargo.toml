@@ -12,10 +12,17 @@ default-members = [
     "src/app",
 ]
 
+[profile.release]
+opt-level = "z"     # Optimize for minimum binary size
+lto = "fat"         # Enable Link-Time Optimization (removes dead code across crate boundaries)
+codegen-units = 1   # Maximize optimization at the cost of slower compile times
+strip = true        # Strip debug symbols and DWARF tables from the final binary
+panic = "abort"     # Remove unwinding code to reduce binary size
+
 [workspace.package]
 authors = ["omnect@conplement.de"]
 edition = "2024"
 homepage = "https://www.omnect.io/home"
 license = "MIT OR Apache-2.0"
 repository = "git@github.com:omnect/omnect-ui.git"
-version = "1.1.2"
+version = "1.1.3"

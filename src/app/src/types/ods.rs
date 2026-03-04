@@ -49,6 +49,7 @@ pub struct OdsSystemInfo {
     pub azure_sdk_version: String,
     pub omnect_device_service_version: String,
     pub boot_time: Option<String>,
+    pub hostname: String,
 }
 
 impl From<OdsSystemInfo> for SystemInfo {
@@ -61,6 +62,7 @@ impl From<OdsSystemInfo> for SystemInfo {
             azure_sdk_version: ods.azure_sdk_version,
             omnect_device_service_version: ods.omnect_device_service_version,
             boot_time: ods.boot_time,
+            hostname: ods.hostname,
         }
     }
 }

@@ -155,8 +155,8 @@ pub fn handle(event: DeviceEvent, model: &mut Model) -> Command<Effect, Event> {
             result,
             model,
             DeviceOperationState::Updating,
-            "Update started",
-            "Update started (connection lost)",
+            "Update installed, initiating reboot...",
+            "Update installed, initiating reboot (connection lost)...",
             "Rebooting to new firmware",
             Some("The device is restarting with the updated firmware.".to_string()),
         ),
@@ -486,7 +486,10 @@ mod tests {
 
             assert!(!model.is_loading);
             assert_eq!(model.device_operation_state, DeviceOperationState::Updating);
-            assert_eq!(model.success_message, Some("Update started".into()));
+            assert_eq!(
+                model.success_message,
+                Some("Update installed, initiating reboot...".into())
+            );
             assert!(model.overlay_spinner.is_visible());
         }
 
@@ -506,7 +509,7 @@ mod tests {
             assert_eq!(model.device_operation_state, DeviceOperationState::Updating);
             assert_eq!(
                 model.success_message,
-                Some("Update started (connection lost)".into())
+                Some("Update installed, initiating reboot (connection lost)...".into())
             );
         }
     }

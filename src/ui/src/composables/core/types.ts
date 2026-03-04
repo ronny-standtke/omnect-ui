@@ -133,6 +133,7 @@ export interface ViewModel {
 		azureSdkVersion: string
 		omnectDeviceServiceVersion: string
 		bootTime: string | null
+		hostname: string
 	} | null
 	networkStatus: {
 		networkStatus: DeviceNetwork[]

@@ -123,8 +123,8 @@ test.describe('Device Update', () => {
     });
 
     // The UI should show success message
-    // "Update started" should be visible initially.
-    await expect(page.getByText('Update started')).toBeVisible();
+    // "Update installed, initiating reboot..." should be visible initially.
+    await expect(page.getByText('Update installed, initiating reboot...')).toBeVisible();
     
     // Eventually (after ~1-1.5s), it should succeed and redirect to login
     await expect(page).toHaveURL(/.*\/login/, { timeout: 10000 });

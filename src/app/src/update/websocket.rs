@@ -82,7 +82,7 @@ mod tests {
         fn updates_system_info() {
             let mut model = Model::default();
 
-            let json = r#"{"os": {"name": "Linux", "version": "5.10"}, "azure_sdk_version": "1.0", "omnect_device_service_version": "2.0", "boot_time": "2024-01-01T00:00:00Z"}"#;
+            let json = r#"{"os": {"name": "Linux", "version": "5.10"}, "azure_sdk_version": "1.0", "omnect_device_service_version": "2.0", "boot_time": "2024-01-01T00:00:00Z", "hostname": "omnect-device"}"#;
 
             let expected_info = SystemInfo {
                 os: OsInfo {
@@ -92,6 +92,7 @@ mod tests {
                 azure_sdk_version: "1.0".into(),
                 omnect_device_service_version: "2.0".into(),
                 boot_time: Some("2024-01-01T00:00:00Z".into()),
+                hostname: "omnect-device".into(),
             };
 
             let _ = handle(WebSocketEvent::SystemInfoUpdated(json.into()), &mut model);

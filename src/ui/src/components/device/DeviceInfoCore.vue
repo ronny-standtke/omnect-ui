@@ -21,6 +21,7 @@ const deviceInfo = computed(
   () =>
     new Map([
       ['omnect Cloud Connection', viewModel.onlineStatus?.iothub ? 'connected' : 'disconnected'],
+      ['Hostname', viewModel.systemInfo?.hostname ?? 'n/a'],
       ['omnect Secure OS variant', viewModel.systemInfo?.os.name ?? 'n/a'],
       [
         'Boot time',

@@ -135,7 +135,7 @@ test.describe('Device Update Rollback', () => {
     await installBtn.click();
 
     await expect(async () => expect(runCalled).toBe(true)).toPass();
-    await expect(page.getByText('Update started')).toBeVisible();
+    await expect(page.getByText('Update installed, initiating reboot...')).toBeVisible();
 
     // 4. Mock Healthcheck Rollback
     // - Simulate offline (abort)
@@ -323,7 +323,7 @@ test.describe('Device Update Rollback', () => {
 
     // Upload and install the second update
     await uploadAndInstall(page, '4.1.0');
-    await expect(page.getByText('Update started')).toBeVisible();
+    await expect(page.getByText('Update installed, initiating reboot...')).toBeVisible();
 
     // Device reboots — app redirects to login once reconnection polling detects the result
     await expect(page).toHaveURL(/.*\/login/, { timeout: 25000 });

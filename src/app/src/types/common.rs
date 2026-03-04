@@ -16,6 +16,7 @@ pub struct SystemInfo {
     pub azure_sdk_version: String,
     pub omnect_device_service_version: String,
     pub boot_time: Option<String>,
+    pub hostname: String,
 }
 
 /// Online status from WebSocket
